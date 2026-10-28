@@ -27,7 +27,7 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
-std::vector<cv::Vec3f> detectBallsX(Mat* image)
+std::vector<cv::Vec3f> detectBallsHough(Mat* image)
 {
 	cv::Mat greenMask;
 	{
@@ -40,16 +40,6 @@ std::vector<cv::Vec3f> detectBallsX(Mat* image)
 			cv::Scalar(90, 255, 255),
 			greenMask
 		);
-
-		//cv::Mat candidateMask;
-		//cv::bitwise_not(greenMask, candidateMask);
-		//
-		//cv::morphologyEx(
-		//	candidateMask,
-		//	candidateMask,
-		//	cv::MORPH_CLOSE,
-		//	cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5))
-		//);
 	}
 
 	cv::Mat gray;
@@ -86,21 +76,19 @@ std::vector<cv::Vec3f> detectBallsX(Mat* image)
 		);
 	}
 
-	// TODO: Reject if on felt or net
+	// TODO: Reject if on felt or net, select best of overlapping circles
 
 	return circles;
 }
 
-std::vector<cv::Vec3f> detectBalls(cv::Mat* image)
+std::vector<cv::Vec3f> detectBallsWatershed(Mat* image)
 {
-	CV_Assert(image != nullptr && !image->empty());
-
-	cv::Mat foreground;
+	cv::Mat greenMask;
+	cv::Mat foregroundMask;
 	{
 		cv::Mat hsv;
 		cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
 
-		cv::Mat greenMask;
 		cv::inRange(
 			hsv,
 			cv::Scalar(40, 60, 60),
@@ -108,58 +96,101 @@ std::vector<cv::Vec3f> detectBalls(cv::Mat* image)
 			greenMask
 		);
 
-		cv::bitwise_not(greenMask, foreground);
+		cv::bitwise_not(greenMask, foregroundMask);
 
 		cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
-		cv::morphologyEx(foreground, foreground, cv::MORPH_CLOSE, kernel);
-		cv::morphologyEx(foreground, foreground, cv::MORPH_OPEN, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3)));
+		cv::morphologyEx(foregroundMask, foregroundMask, cv::MORPH_CLOSE, kernel);
+		cv::morphologyEx(foregroundMask, foregroundMask, cv::MORPH_OPEN, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3)));
+	}
+
+	//imshow(".", foregroundMask);
+
+	cv::Mat colorGrad;
+	{
+		cv::Mat lab;
+		cv::cvtColor(*image, lab, cv::COLOR_BGR2Lab);
+
+		std::vector<cv::Mat> ch;
+		cv::split(lab, ch);
+
+		cv::Mat dx, dy;
+		cv::Mat dxL, dyL, dxA, dyA, dxB, dyB;
+
+		cv::Sobel(ch[0], dxL, CV_32F, 1, 0, 3);
+		cv::Sobel(ch[0], dyL, CV_32F, 0, 1, 3);
+		cv::Sobel(ch[1], dxA, CV_32F, 1, 0, 3);
+		cv::Sobel(ch[1], dyA, CV_32F, 0, 1, 3);
+		cv::Sobel(ch[2], dxB, CV_32F, 1, 0, 3);
+		cv::Sobel(ch[2], dyB, CV_32F, 0, 1, 3);
+
+		cv::magnitude(dxA, dyA, dx);
+		cv::magnitude(dxB, dyB, dy);
+
+		colorGrad = dx + dy;
+
+		//imshow(".", colorGrad);
 	}
 
 	cv::Mat dist;
 	{
-		cv::distanceTransform(foreground, dist, cv::DIST_L2, 5);
+		cv::Mat gray, edges;
+
+		cv::Mat hsv, hue, hueDisplay;
+		cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
+		cv::extractChannel(hsv, hue, 0);
+		hue.convertTo(hueDisplay, CV_8U, 255.0 / 179.0);
+
+		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
+
+		Mat col = hue;
+		col.setTo(0, greenMask);
+		cv::GaussianBlur(col, col, cv::Size(9, 9), 2.0);
+
+		//cv::Canny(col, edges, 50, 120);
+		cv::Canny(col, edges, 27, 30);
+
+		cv::Mat inverseEdges;
+		cv::bitwise_not(edges, inverseEdges);
+
+		Mat mask;
+		cv::bitwise_and(foregroundMask, inverseEdges, mask);
+
+		//imshow(".", mask);
+
+		cv::distanceTransform(mask, dist, cv::DIST_L2, 5);
 
 		cv::Mat dist8;
 		cv::normalize(dist, dist8, 0, 255, cv::NORM_MINMAX);
 		dist8.convertTo(dist8, CV_8U);
+		cv::applyColorMap(dist8, dist8, cv::COLORMAP_JET);
 
 		//imshow(".", dist8);
 	}
 
-	// Tune this fraction: higher = fewer, more central seeds.
-	cv::Mat sureForeground;
+	cv::Mat maxima;
 	{
-		cv::threshold(
-			dist,
-			sureForeground,
-			0.7 * 30.0,  // Assumes ball radius around 30 px
-			255,
-			cv::THRESH_BINARY
-		);
-		sureForeground.convertTo(sureForeground, CV_8U);
+		int kernelSize = 9;
+
+		cv::Mat dilated;
+		cv::dilate(dist, dilated, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(kernelSize, kernelSize)));
+		cv::compare(dist, dilated, maxima, cv::CMP_GE);
+
+		cv::Mat deep;
+		cv::threshold(dist, deep, 12.0, 255, cv::THRESH_BINARY);
+		deep.convertTo(deep, CV_8U);
+		cv::bitwise_and(maxima, deep, maxima);
+
+		cv::Mat sufficientlyDeep;
+		cv::threshold(dist, sufficientlyDeep, 0.4 * 30.0, 255, cv::THRESH_BINARY);
+		sufficientlyDeep.convertTo(sufficientlyDeep, CV_8U);
+
+		cv::bitwise_and(maxima, sufficientlyDeep, maxima);
+
+		//imshow(".", maxima);
 	}
 
-	//imshow(".", sureForeground);
-
-	cv::Mat seedLabels;
-	int nSeeds = cv::connectedComponents(sureForeground, seedLabels, 8, CV_32S);
-
-	cv::Mat markers = cv::Mat::zeros(foreground.size(), CV_32S);
-	markers.setTo(1, foreground == 0);
-
-	for (int y = 0; y < seedLabels.rows; ++y)
-	{
-		for (int x = 0; x < seedLabels.cols; ++x)
-		{
-			int label = seedLabels.at<int>(y, x);
-
-			if (label > 0)
-				markers.at<int>(y, x) = label + 1;
-		}
-	}
-
-	cv::Mat watershedImage = image->clone();
-	cv::watershed(watershedImage, markers);
+	cv::Mat seedLabels, stats, centroids;
+	int nSeeds = cv::connectedComponentsWithStats(maxima, seedLabels, stats, centroids, 8, CV_32S);
 
 	cv::Mat display;
 	cv::normalize(
@@ -173,29 +204,15 @@ std::vector<cv::Vec3f> detectBalls(cv::Mat* image)
 	//imshow(".", display);
 
 	std::vector<cv::Vec3f> circles;
-
-	for (int label = 2; label < nSeeds + 1; ++label)
+	for (int i = 1; i < nSeeds; ++i)
 	{
-		cv::Mat region = (markers == label);
+		cv::Point2f p(
+			static_cast<float>(centroids.at<double>(i, 0)),
+			static_cast<float>(centroids.at<double>(i, 1))
+		);
 
-		std::vector<cv::Point> points;
-		cv::findNonZero(region, points);
-
-		if (points.size() < 20)
-			continue;
-
-		cv::Point2f center;
-		float radius;
-		cv::minEnclosingCircle(points, center, radius);
-
-		// Reject implausible ball sizes.
-		if (radius >= 20.0f && radius <= 40.0f)
-		{
-			circles.emplace_back(
-				center.x, center.y, radius);
-		}
+		circles.push_back(cv::Vec3f(p.x, p.y, 30.0f));
 	}
-
 	return circles;
 }
 
@@ -273,7 +290,7 @@ void MyApplication()
 {
 	const char* folderPath = "Media/Pool/";
 	const char* fileNames[] = {
-		"AllBalls.jpeg",
+		//"AllBalls.jpeg",
 		"Table1.jpeg",
 		"Table2.jpeg",
 		"Table3.jpeg",
@@ -307,8 +324,10 @@ void MyApplication()
 
 		perspectiveTransform(in, out, srcPoints, width, height);
 
-		std::vector<cv::Vec3f> circles = detectBalls(out);
-		drawHollowCircles(out, circles);
+		std::vector<cv::Vec3f> circlesH = detectBallsHough(out);
+		std::vector<cv::Vec3f> circlesWS = detectBallsWatershed(out);
+		drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
+		drawHollowCircles(out, circlesWS, cv::Scalar(255, 0, 0));
 
 		//nearestNeighbourQuantize(out, out);
 		
