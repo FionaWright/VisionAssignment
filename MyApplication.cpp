@@ -29,21 +29,45 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 
 std::vector<cv::Vec3f> detectBalls(Mat* image)
 {
+	cv::Mat hsv;
+	cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
+
+	cv::Mat greenMask;
+	cv::inRange(
+		hsv,
+		cv::Scalar(40, 40, 65),
+		cv::Scalar(90, 255, 255),
+		greenMask
+	);
+
+	cv::Mat candidateMask;
+	cv::bitwise_not(greenMask, candidateMask);
+
+	cv::morphologyEx(
+		candidateMask,
+		candidateMask,
+		cv::MORPH_CLOSE,
+		cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5))
+	);
+
 	cv::Mat gray;
 	cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 
 	const int kernelSize = 5;
 	const double strength = 1.2;
 	cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
+	gray.setTo(0, greenMask);
+
+	imshow(".", gray);
 
 	std::vector<cv::Vec3f> circles;
 
 	const double inverseAccumReso = 1.2;
-	const double minCenterDistance = 10.0;
-	const double upperCannyThreshold = 20.0;
-	const double accumThreshold = 23.0;
+	const double minCenterDistance = 33.0;
+	const double upperCannyThreshold = 50;
+	const double accumThreshold = 15.0;
 	const int minRadius = 25;
-	const int maxRadius = 30;
+	const int maxRadius = 32;
 
 	cv::HoughCircles(
 		gray,
@@ -56,6 +80,8 @@ std::vector<cv::Vec3f> detectBalls(Mat* image)
 		minRadius,     
 		maxRadius      
 	);
+
+	// TODO: Reject if on felt or net
 
 	return circles;
 }
@@ -157,10 +183,10 @@ void MyApplication()
 
 		// NW, NE, SE, SW
 		cv::Point2f srcPoints[4] = {
-			{336,  24},
-			{1575, 10},
-			{1902, 449},
-			{25, 470},
+			{337,  35},
+			{1570, 21},
+			{1888, 451},
+			{38, 472},
 		};
 
 		size_t width = in->cols;
