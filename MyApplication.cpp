@@ -27,6 +27,54 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
+std::vector<cv::Vec3f> detectBalls(Mat* image)
+{
+	cv::Mat gray;
+	cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
+
+	const int kernelSize = 5;
+	const double strength = 1.2;
+	cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
+
+	std::vector<cv::Vec3f> circles;
+
+	const double inverseAccumReso = 1.2;
+	const double minCenterDistance = 10.0;
+	const double upperCannyThreshold = 20.0;
+	const double accumThreshold = 23.0;
+	const int minRadius = 25;
+	const int maxRadius = 30;
+
+	cv::HoughCircles(
+		gray,
+		circles,
+		cv::HOUGH_GRADIENT,
+		inverseAccumReso,    
+		minCenterDistance,   
+		upperCannyThreshold, 
+		accumThreshold,
+		minRadius,     
+		maxRadius      
+	);
+
+	return circles;
+}
+
+// For Debugging
+void drawHollowCircles(
+	Mat* image,
+	const std::vector<cv::Vec3f>& circles,
+	const cv::Scalar& color = cv::Scalar(0, 0, 255),
+	int thickness = 2)
+{
+	for (const auto& circle : circles)
+	{
+		const cv::Point2i p = cv::Point2i(circle[0], circle[1]);
+		const float radius = circle[2];
+		cv::circle(*image, p, radius, color, thickness);
+	}
+}
+
 void nearestNeighbourQuantize(Mat* src, Mat* dst)
 {
 	// BGR
@@ -60,13 +108,13 @@ void nearestNeighbourQuantize(Mat* src, Mat* dst)
 			cv::Vec3b pixel = src->at<cv::Vec3b>(y, x);
 
 			size_t bestIndex = 0;
-			size_t minLenSqr = INT_MAX;
+			int minLenSqr = INT_MAX;
 
 			for (size_t i = 0; i < paletteU.size(); ++i)
 			{
-				size_t db = pixel[0] - paletteU[i][0];
-				size_t dg = pixel[1] - paletteU[i][1];
-				size_t dr = pixel[2] - paletteU[i][2];
+				int db = static_cast<int>(pixel[0]) - paletteU[i][0];
+				int dg = static_cast<int>(pixel[1]) - paletteU[i][1];
+				int dr = static_cast<int>(pixel[2]) - paletteU[i][2];
 
 				size_t lenSqr = db * db + dg * dg + dr * dr;
 
@@ -120,7 +168,10 @@ void MyApplication()
 
 		perspectiveTransform(in, out, srcPoints, width, height);
 
-		nearestNeighbourQuantize(out, out);
+		std::vector<cv::Vec3f> circles = detectBalls(out);
+		drawHollowCircles(out, circles);
+
+		//nearestNeighbourQuantize(out, out);
 		
 		imshow(fileNames[i], *out);
 
