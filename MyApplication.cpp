@@ -27,6 +27,61 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
+void nearestNeighbourQuantize(Mat* src, Mat* dst)
+{
+	// BGR
+	std::vector<cv::Vec3f> paletteF = {
+		{0.5, 0.8, 0.9},		// White
+		{0, 0.5, 0.9},			// Yellow
+		{0.3, 0, 0},			// Blue
+		{0, 0, 1.0},			// Red
+		{0.1, 0, 0.05},			// Purple
+		{0, 0.15, 0.9},			// Orange
+		{0.1, 0.2, 0.1},		// Green
+		{0.05, 0.05, 0.3},		// Brown
+		{0, 0, 0},				// Black
+		{0.36, 0.5, 0.34},		// Green Table
+	};
+
+	std::vector<cv::Vec3b> paletteU;
+	for (size_t i = 0; i < paletteF.size(); i++)
+	{
+		cv::Vec3b colorU = cv::Vec3b(255 * paletteF[i][0], 255 * paletteF[i][1], 255 * paletteF[i][2]);
+		paletteU.emplace_back(colorU);
+	}
+
+	size_t width = src->cols;
+	size_t height = src->rows;
+
+	for (int y = 0; y < height; ++y)
+	{
+		for (int x = 0; x < width; ++x)
+		{
+			cv::Vec3b pixel = src->at<cv::Vec3b>(y, x);
+
+			size_t bestIndex = 0;
+			size_t minLenSqr = INT_MAX;
+
+			for (size_t i = 0; i < paletteU.size(); ++i)
+			{
+				size_t db = pixel[0] - paletteU[i][0];
+				size_t dg = pixel[1] - paletteU[i][1];
+				size_t dr = pixel[2] - paletteU[i][2];
+
+				size_t lenSqr = db * db + dg * dg + dr * dr;
+
+				if (lenSqr < minLenSqr)
+				{
+					minLenSqr = lenSqr;
+					bestIndex = i;
+				}
+			}
+
+			dst->at<cv::Vec3b>(y, x) = paletteU[bestIndex];
+		}
+	}
+}
+
 void MyApplication()
 {
 	const char* folderPath = "Media/Pool/";
@@ -64,6 +119,8 @@ void MyApplication()
 		size_t height = in->rows;
 
 		perspectiveTransform(in, out, srcPoints, width, height);
+
+		nearestNeighbourQuantize(out, out);
 		
 		imshow(fileNames[i], *out);
 
