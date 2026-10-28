@@ -27,7 +27,20 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
-std::vector<cv::Vec3f> detectBallsHough(Mat* image)
+enum CandidateSource
+{
+	eHough,
+	eWatershed
+};
+
+struct BallCandidate
+{
+	cv::Point2f Center;
+	float Radius;
+	CandidateSource Source;  
+};
+
+std::vector<BallCandidate> detectBallsHough(Mat* image)
 {
 	cv::Mat greenMask;
 	{
@@ -54,7 +67,7 @@ std::vector<cv::Vec3f> detectBallsHough(Mat* image)
 
 	imshow(".", gray);
 
-	std::vector<cv::Vec3f> circles;
+	std::vector<BallCandidate> candidates;
 	{
 		const double inverseAccumReso = 1.2;
 		const double minCenterDistance = 33.0;
@@ -62,6 +75,8 @@ std::vector<cv::Vec3f> detectBallsHough(Mat* image)
 		const double accumThreshold = 15.0;
 		const int minRadius = 25;
 		const int maxRadius = 32;
+
+		std::vector<cv::Vec3f> circles;
 
 		cv::HoughCircles(
 			gray,
@@ -74,14 +89,21 @@ std::vector<cv::Vec3f> detectBallsHough(Mat* image)
 			minRadius,
 			maxRadius
 		);
+
+		for (int i = 0; i < circles.size(); i++)
+		{
+			BallCandidate candidate;
+			candidate.Center = cv::Point(circles[i][0], circles[i][1]);
+			candidate.Radius = circles[i][2];
+			candidate.Source = eHough;
+			candidates.emplace_back(candidate);
+		}
 	}
 
-	// TODO: Reject if on felt or net, select best of overlapping circles
-
-	return circles;
+	return candidates;
 }
 
-std::vector<cv::Vec3f> detectBallsWatershed(Mat* image)
+std::vector<BallCandidate> detectBallsWatershed(Mat* image)
 {
 	cv::Mat greenMask;
 	cv::Mat foregroundMask;
@@ -203,7 +225,7 @@ std::vector<cv::Vec3f> detectBallsWatershed(Mat* image)
 
 	//imshow(".", display);
 
-	std::vector<cv::Vec3f> circles;
+	std::vector<BallCandidate> candidates;
 	for (int i = 1; i < nSeeds; ++i)
 	{
 		cv::Point2f p(
@@ -211,23 +233,77 @@ std::vector<cv::Vec3f> detectBallsWatershed(Mat* image)
 			static_cast<float>(centroids.at<double>(i, 1))
 		);
 
-		circles.push_back(cv::Vec3f(p.x, p.y, 30.0f));
+		BallCandidate candidate;
+		candidate.Center = p;
+		candidate.Radius = 30.0f;
+		candidate.Source = eWatershed;
+		candidates.push_back(candidate);
 	}
-	return circles;
+	return candidates;
+}
+
+std::vector<BallCandidate> combineCircles(
+	const std::vector<BallCandidate>& candidatesA,
+	const std::vector<BallCandidate>& candidatesB,
+	float centerThreshold = 15.0f,
+	float radiusThreshold = 8.0f)
+{
+	std::vector<BallCandidate> candidates;
+	candidates.insert(candidates.end(), candidatesA.begin(), candidatesA.end());
+	candidates.insert(candidates.end(), candidatesB.begin(), candidatesB.end());
+
+	std::vector<bool> used(candidates.size(), false);
+	std::vector<BallCandidate> result;
+
+	for (size_t i = 0; i < candidates.size(); ++i)
+	{
+		if (used[i])
+			continue;
+
+		float sumX = 0.0f, sumY = 0.0f, sumR = 0.0f;
+		int count = 0;
+
+		for (size_t j = i; j < candidates.size(); ++j)
+		{
+			if (used[j])
+				continue;
+
+			float dx = candidates[i].Center.x - candidates[j].Center.x;
+			float dy = candidates[i].Center.y - candidates[j].Center.y;
+
+			float d = std::sqrt(dx * dx + dy * dy);
+			float dr = std::abs(candidates[i].Radius - candidates[j].Radius);
+
+			if (d <= centerThreshold && dr <= radiusThreshold)
+			{
+				used[j] = true;
+				sumX += candidates[j].Center.x;
+				sumY += candidates[j].Center.y;
+				sumR += candidates[j].Radius;
+				++count;
+			}
+		}
+
+		result.push_back({
+			cv::Point2f(sumX / count, sumY / count),
+			sumR / count,
+			candidates[i].Source
+			});
+	}
+
+	return result;
 }
 
 // For Debugging
 void drawHollowCircles(
 	Mat* image,
-	const std::vector<cv::Vec3f>& circles,
+	const std::vector<BallCandidate>& circles,
 	const cv::Scalar& color = cv::Scalar(0, 0, 255),
 	int thickness = 2)
 {
 	for (const auto& circle : circles)
 	{
-		const cv::Point2i p = cv::Point2i(circle[0], circle[1]);
-		const float radius = circle[2];
-		cv::circle(*image, p, radius, color, thickness);
+		cv::circle(*image, circle.Center, circle.Radius, color, thickness);
 	}
 }
 
@@ -290,7 +366,7 @@ void MyApplication()
 {
 	const char* folderPath = "Media/Pool/";
 	const char* fileNames[] = {
-		//"AllBalls.jpeg",
+		"AllBalls.jpeg",
 		"Table1.jpeg",
 		"Table2.jpeg",
 		"Table3.jpeg",
@@ -324,10 +400,14 @@ void MyApplication()
 
 		perspectiveTransform(in, out, srcPoints, width, height);
 
-		std::vector<cv::Vec3f> circlesH = detectBallsHough(out);
-		std::vector<cv::Vec3f> circlesWS = detectBallsWatershed(out);
+		std::vector<BallCandidate> circlesH = detectBallsHough(out);
+		std::vector<BallCandidate> circlesWS = detectBallsWatershed(out);
+		std::vector<BallCandidate> circles = combineCircles(circlesH, circlesWS, 20.0f, 8.0f);
 		drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
 		drawHollowCircles(out, circlesWS, cv::Scalar(255, 0, 0));
+		drawHollowCircles(out, circles, cv::Scalar(255, 255, 255));
+
+		// TODO: Reject if on felt or net, select best of overlapping circles
 
 		//nearestNeighbourQuantize(out, out);
 		
