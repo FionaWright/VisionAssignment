@@ -27,61 +27,174 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
-std::vector<cv::Vec3f> detectBalls(Mat* image)
+std::vector<cv::Vec3f> detectBallsX(Mat* image)
 {
-	cv::Mat hsv;
-	cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
-
 	cv::Mat greenMask;
-	cv::inRange(
-		hsv,
-		cv::Scalar(40, 40, 65),
-		cv::Scalar(90, 255, 255),
-		greenMask
-	);
+	{
+		cv::Mat hsv;
+		cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
 
-	cv::Mat candidateMask;
-	cv::bitwise_not(greenMask, candidateMask);
+		cv::inRange(
+			hsv,
+			cv::Scalar(40, 40, 65),
+			cv::Scalar(90, 255, 255),
+			greenMask
+		);
 
-	cv::morphologyEx(
-		candidateMask,
-		candidateMask,
-		cv::MORPH_CLOSE,
-		cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5))
-	);
+		//cv::Mat candidateMask;
+		//cv::bitwise_not(greenMask, candidateMask);
+		//
+		//cv::morphologyEx(
+		//	candidateMask,
+		//	candidateMask,
+		//	cv::MORPH_CLOSE,
+		//	cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5))
+		//);
+	}
 
 	cv::Mat gray;
-	cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
+	{
+		cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 
-	const int kernelSize = 5;
-	const double strength = 1.2;
-	cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
-	gray.setTo(0, greenMask);
+		const int kernelSize = 5;
+		const double strength = 1.2;
+		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
+		gray.setTo(0, greenMask);
+	}
 
 	imshow(".", gray);
 
 	std::vector<cv::Vec3f> circles;
+	{
+		const double inverseAccumReso = 1.2;
+		const double minCenterDistance = 33.0;
+		const double upperCannyThreshold = 50;
+		const double accumThreshold = 15.0;
+		const int minRadius = 25;
+		const int maxRadius = 32;
 
-	const double inverseAccumReso = 1.2;
-	const double minCenterDistance = 33.0;
-	const double upperCannyThreshold = 50;
-	const double accumThreshold = 15.0;
-	const int minRadius = 25;
-	const int maxRadius = 32;
-
-	cv::HoughCircles(
-		gray,
-		circles,
-		cv::HOUGH_GRADIENT,
-		inverseAccumReso,    
-		minCenterDistance,   
-		upperCannyThreshold, 
-		accumThreshold,
-		minRadius,     
-		maxRadius      
-	);
+		cv::HoughCircles(
+			gray,
+			circles,
+			cv::HOUGH_GRADIENT,
+			inverseAccumReso,
+			minCenterDistance,
+			upperCannyThreshold,
+			accumThreshold,
+			minRadius,
+			maxRadius
+		);
+	}
 
 	// TODO: Reject if on felt or net
+
+	return circles;
+}
+
+std::vector<cv::Vec3f> detectBalls(cv::Mat* image)
+{
+	CV_Assert(image != nullptr && !image->empty());
+
+	cv::Mat foreground;
+	{
+		cv::Mat hsv;
+		cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
+
+		cv::Mat greenMask;
+		cv::inRange(
+			hsv,
+			cv::Scalar(40, 60, 60),
+			cv::Scalar(90, 255, 255),
+			greenMask
+		);
+
+		cv::bitwise_not(greenMask, foreground);
+
+		cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5));
+		cv::morphologyEx(foreground, foreground, cv::MORPH_CLOSE, kernel);
+		cv::morphologyEx(foreground, foreground, cv::MORPH_OPEN, cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3)));
+	}
+
+	cv::Mat dist;
+	{
+		cv::distanceTransform(foreground, dist, cv::DIST_L2, 5);
+
+		cv::Mat dist8;
+		cv::normalize(dist, dist8, 0, 255, cv::NORM_MINMAX);
+		dist8.convertTo(dist8, CV_8U);
+
+		//imshow(".", dist8);
+	}
+
+	// Tune this fraction: higher = fewer, more central seeds.
+	cv::Mat sureForeground;
+	{
+		cv::threshold(
+			dist,
+			sureForeground,
+			0.7 * 30.0,  // Assumes ball radius around 30 px
+			255,
+			cv::THRESH_BINARY
+		);
+		sureForeground.convertTo(sureForeground, CV_8U);
+	}
+
+	//imshow(".", sureForeground);
+
+	cv::Mat seedLabels;
+	int nSeeds = cv::connectedComponents(sureForeground, seedLabels, 8, CV_32S);
+
+	cv::Mat markers = cv::Mat::zeros(foreground.size(), CV_32S);
+	markers.setTo(1, foreground == 0);
+
+	for (int y = 0; y < seedLabels.rows; ++y)
+	{
+		for (int x = 0; x < seedLabels.cols; ++x)
+		{
+			int label = seedLabels.at<int>(y, x);
+
+			if (label > 0)
+				markers.at<int>(y, x) = label + 1;
+		}
+	}
+
+	cv::Mat watershedImage = image->clone();
+	cv::watershed(watershedImage, markers);
+
+	cv::Mat display;
+	cv::normalize(
+		seedLabels,
+		display,
+		0, 255,
+		cv::NORM_MINMAX,
+		CV_8U
+	);
+
+	//imshow(".", display);
+
+	std::vector<cv::Vec3f> circles;
+
+	for (int label = 2; label < nSeeds + 1; ++label)
+	{
+		cv::Mat region = (markers == label);
+
+		std::vector<cv::Point> points;
+		cv::findNonZero(region, points);
+
+		if (points.size() < 20)
+			continue;
+
+		cv::Point2f center;
+		float radius;
+		cv::minEnclosingCircle(points, center, radius);
+
+		// Reject implausible ball sizes.
+		if (radius >= 20.0f && radius <= 40.0f)
+		{
+			circles.emplace_back(
+				center.x, center.y, radius);
+		}
+	}
 
 	return circles;
 }
