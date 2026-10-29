@@ -108,19 +108,6 @@ void computeFeltMask(Mat* src, Mat* dst)
 		S = channels[2];
 	}
 
-	cv::Mat feltMask;
-	{
-		cv::Mat hsv;
-		cv::cvtColor(*src, hsv, cv::COLOR_BGR2HSV);
-
-		cv::inRange(
-			hsv,
-			cv::Scalar(40, 40, 65),
-			cv::Scalar(90, 255, 255),
-			feltMask
-		);
-	}
-
 	cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
 
 	cv::Mat inverseEdges;
@@ -143,6 +130,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 		//imshow(".", edges);
 	}
 
+	cv::Mat feltMask;
 	{
 		cv::Mat hsv;
 		cv::cvtColor(*src, hsv, cv::COLOR_BGR2HSV);
@@ -493,7 +481,9 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 
 	std::vector<AssignedCandidate> assignedList;
 
-	auto selectBall = [&](BallID ballId)
+	// Greedy Approach
+	{
+		auto selectBall = [&](BallID ballId)
 		{
 			float maxWeight = -1.0f;
 			int maxIdx = -1;
@@ -529,24 +519,27 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			}
 		};
 
-	selectBall(BallID::eWhite);
-	selectBall(BallID::eBlack);
+		selectBall(BallID::eWhite);
+		selectBall(BallID::eBlack);
 
-	selectBall(BallID::eYellowSolid);
-	selectBall(BallID::eOrangeSolid);
-	selectBall(BallID::eRedSolid);
-	selectBall(BallID::eBrownSolid);
-	selectBall(BallID::ePurpleSolid);
-	selectBall(BallID::eBlueSolid);
-	selectBall(BallID::eGreenSolid);
+		selectBall(BallID::eYellowSolid);
+		selectBall(BallID::eOrangeSolid);
+		selectBall(BallID::eRedSolid);
+		selectBall(BallID::eBrownSolid);
+		selectBall(BallID::ePurpleSolid);
+		selectBall(BallID::eBlueSolid);
+		selectBall(BallID::eGreenSolid);
 
-	selectBall(BallID::eYellowStriped);
-	selectBall(BallID::eOrangeStriped);
-	selectBall(BallID::eRedStriped);
-	selectBall(BallID::eBrownStriped);
-	selectBall(BallID::ePurpleStriped);
-	selectBall(BallID::eBlueStriped);
-	selectBall(BallID::eGreenStriped);
+		selectBall(BallID::eYellowStriped);
+		selectBall(BallID::eOrangeStriped);
+		selectBall(BallID::eRedStriped);
+		selectBall(BallID::eBrownStriped);
+		selectBall(BallID::ePurpleStriped);
+		selectBall(BallID::eBlueStriped);
+		selectBall(BallID::eGreenStriped);
+	}
+
+	// TODO: Next steps are hungarian non-greedy selection (Still do solids then stripes? Or have weight based on multiple colors?)
 
 	return assignedList;
 }
