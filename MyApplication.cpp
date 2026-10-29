@@ -450,15 +450,10 @@ std::vector<BallCandidate> detectBallsWatershed(Mat* image)
 }
 
 std::vector<BallCandidate> combineCircles(
-	const std::vector<BallCandidate>& candidatesA,
-	const std::vector<BallCandidate>& candidatesB,
+	const std::vector<BallCandidate>& candidates,
 	float centerThreshold = 15.0f,
 	float radiusThreshold = 8.0f)
 {
-	std::vector<BallCandidate> candidates;
-	candidates.insert(candidates.end(), candidatesA.begin(), candidatesA.end());
-	candidates.insert(candidates.end(), candidatesB.begin(), candidatesB.end());
-
 	std::vector<bool> used(candidates.size(), false);
 	std::vector<BallCandidate> result;
 
@@ -612,20 +607,17 @@ void MyApplication()
 		std::vector<BallCandidate> circlesC = detectBallsContours(out);
 		std::vector<BallCandidate> circlesWS = detectBallsWatershed(out);
 
-		std::vector<BallCandidate> circles = combineCircles(circlesH, circlesWS, 20.0f, 8.0f);
+		std::vector<BallCandidate> candidates;
+		candidates.insert(candidates.end(), circlesH.begin(), circlesH.end());
+		//candidates.insert(candidates.end(), circlesC.begin(), circlesC.end());
+		//candidates.insert(candidates.end(), circlesWS.begin(), circlesWS.end());
+
+		std::vector<BallCandidate> combined = combineCircles(candidates, 20.0f, 8.0f);
 
 		drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
 		//drawHollowCircles(out, circlesC, cv::Scalar(0, 255, 255));
 		//drawHollowCircles(out, circlesWS, cv::Scalar(255, 0, 0));
-		//drawHollowCircles(out, circles, cv::Scalar(255, 255, 255));
-
-		// TODO: Reject if on felt or net, select best of overlapping circles
-
-		/*
-		* If you have Hough circles, have you tried to CCA into separate units? 
-			Then do a measure of circularity OR calculate the size of the balls (using a HLS channel + counting pixels). All pool balls should be the same size within reason
-			If you have pool balls that are bunched together they should still reasonably stand out against the table so I don’t see why using a HLS channel to define balls wouldn’t work 🤷‍♀️
-		*/
+		drawHollowCircles(out, combined, cv::Scalar(255, 255, 255));
 
 		//nearestNeighbourQuantize(out, out);
 		
