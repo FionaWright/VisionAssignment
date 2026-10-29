@@ -829,82 +829,67 @@ static const std::vector<EvalImageBallPositions> s_EvalBallPositions = {
 	{
 		"AllBalls.jpeg",
 		{
-			{253, 908}, {250, 959}, {255, 1013}, {256, 1072},
+			{293, 797} , {253, 908}, {250, 959}, {255, 1013}, {256, 1072},
 			{254, 1132}, {262, 1184}, {256, 1244}, {253, 1307},
 			{329, 901}, {330, 961}, {334, 1130}, {335, 1013},
-			{336, 1067}, {342, 1245}, {345, 1187}, {293, 797}
+			{336, 1067}, {345, 1187}, {342, 1245}
 		}
 	},
 	{
 		"Table1.jpeg",
 		{
-			{309, 1092}, {1212, 429}, {353, 1174}, {1050, 335},
+			{288, 29}, {309, 1092}, {1212, 429}, {353, 1174}, {1050, 335},
 			{285, 1211}, {261, 1170}, {352, 1173}, {331, 1132},
 			{240, 1210}, {310, 1170}, {1169, 407}, {281, 1135},
-			{374, 1212}, {360, 1091}, {331, 1213}, {288, 29}
+			{374, 1212}, {360, 1091}, {331, 1213}
 		}
 	},
 	{
 		"Table2.jpeg",
 		{
-			{282, 1103}, {620, 1224}, {391, 1121}, {310, 1305},
+			{507, 1169}, {282, 1103}, {620, 1224}, {391, 1121}, {310, 1305},
 			{315, 1046}, {202, 621}, {361, 1173}, {331, 1132},
 			{177, 725}, {185, 1269}, {665, 798}, {296, 438},
-			{53, 1235}, {362, 1090}, {399, 1205}, {507, 1169}
+			{53, 1235}, {362, 1090}, {399, 1205}
 		}
 	},
 	{
 		"Table3.jpeg",
 		{
-			{23, 908}, {616, 1224}, {447, 1199}, {336, 29},
+			{434, 29}, {23, 908}, {616, 1224}, {447, 1199}, {336, 29},
 			{305, 1406}, {210, 621}, {260, 1294}, {226, 1252},
 			{177, 725}, {171, 1270}, {665, 798}, {249, 351},
-			{53, 1233}, {169, 901}, {399, 1201}, {434, 29}
+			{53, 1233}, {169, 901}, {399, 1201}
 		}
 	},
 	{
 		"Table4.jpeg",
 		{
-			{23, 908}, {546, 1407}, {444, 1204}, {-1, -1},
+			{88, 1392}, {23, 908}, {546, 1407}, {444, 1204}, {-1, -1},
 			{305, 1406}, {210, 621}, {260, 1294}, {226, 1252},
 			{181, 724}, {171, 1270}, {665, 798}, {249, 351},
-			{58, 1231}, {169, 901}, {399, 1201}, {88, 1392}
+			{58, 1231}, {169, 901}, {399, 1201}
 		}
 	},
 	{
 		"Table5.jpeg",
 		{
-			{535, 23}, {546, 1407}, {444, 1204}, {-1, -1},
+			{608, 26}, {535, 23}, {546, 1407}, {444, 1204}, {-1, -1},
 			{305, 1406}, {131, 25}, {260, 1294}, {226, 1252},
 			{538, 72}, {171, 1270}, {665, 798}, {249, 351},
-			{-1, -1}, {169, 901}, {399, 1201}, {608, 26}
+			{-1, -1}, {169, 901}, {399, 1201}
 		}
 	},
 	{
 		"Table6.jpeg",
 		{
-			{535, 23}, {477, 1364}, {444, 1204}, {-1, -1},
+			{629, 947}, {535, 23}, {477, 1364}, {444, 1204}, {-1, -1},
 			{305, 1406}, {131, 25}, {260, 1294}, {226, 1252},
 			{538, 72}, {171, 1270}, {-1, -1}, {249, 351},
-			{-1, -1}, {169, 901}, {399, 1201}, {629, 947}
+			{-1, -1}, {169, 901}, {399, 1201}
 		}
 	}
 };
-
-// TODO: Change ball order to match?
-int evalBallIdToBallId(int idx)
-{
-	if (idx == 15)
-		return 0;
-	return idx + 1;
-}
-
-int ballIdToEvalBallId(int idx)
-{
-	if (idx == 0)
-		return 15;
-	return idx - 1;
-}
 
 float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<AssignedCandidate>& candidates)
 {
@@ -922,8 +907,7 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 			}
 		}
 
-		int evalBallIdx = ballIdToEvalBallId(i);
-		EvalBallPosition evalPos = eval.Balls[evalBallIdx];
+		EvalBallPosition evalPos = eval.Balls[i];
 
 		bool foundCandidate = candidate != nullptr;
 		bool ballOnTable = evalPos.Row != -1 && evalPos.Column != -1;
@@ -960,19 +944,18 @@ void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
 {
 	for (int i = 0; i < BallID::eCount; i++)
 	{
-		int evalBallIdx = ballIdToEvalBallId(i);
-		EvalBallPosition evalPos = eval.Balls[evalBallIdx];
+		EvalBallPosition evalPos = eval.Balls[i];
 
 		bool ballOnTable = evalPos.Row != -1 && evalPos.Column != -1;
 
 		if (!ballOnTable)
 			continue;
 
-		int imageCoordX = evalPos.Column + s_Config.TablePoints[0].x;
-		int imageCoordY = evalPos.Row + s_Config.TablePoints[0].y;
+		//int imageCoordX = evalPos.Column + s_Config.TablePoints[0].x;
+		//int imageCoordY = evalPos.Row + s_Config.TablePoints[0].y;
 
-		//int imageCoordX = evalPos.Column;
-		//int imageCoordY = evalPos.Row;
+		int imageCoordX = evalPos.Column;
+		int imageCoordY = evalPos.Row;
 		cv::Point p(imageCoordX, imageCoordY);
 
 		cv::Vec3b color = s_Config.DrawPalette[i];
@@ -1036,7 +1019,8 @@ void MyApplication()
 		totalScore += score;
 
 		display = out->clone();
-		//affineTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
+		perspectiveTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
+		cv::resize(display, display, cv::Size(1434, 683));
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
 		imshow("Eval", display);
 
