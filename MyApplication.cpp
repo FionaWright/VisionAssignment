@@ -34,7 +34,7 @@ void crop(Mat* src, Mat* dst, cv::Point* srcPoints, cv::Scalar value)
 
 	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
 
-	*dst = *src;
+	*dst = src->clone();
 	dst->setTo(value, mask == 0);
 }
 
@@ -545,8 +545,8 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 
 	std::vector<std::vector<float>> weightMatrix;
 
-	constexpr float RADIUS_MULTIPLIER = 0.75f;
-	constexpr float STRIPES_WEIGHT_MULTIPLIER = 0.6f;
+	constexpr float RADIUS_MULTIPLIER = 0.8f;
+	constexpr float STRIPES_WEIGHT_MULTIPLIER = 0.3f;
 	constexpr float MIN_WEIGHT_THRESHOLD = 0.001f;
 
 	for (uint32_t i = 0; i < candidates.size(); i++)
@@ -563,7 +563,12 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			float weight = averageColorWeight(lab, *feltMask, candidate, expectedLab, 15.0f);
 
 			if (j >= 9)
-				weight *= STRIPES_WEIGHT_MULTIPLIER;
+			{
+				cv::Vec3f white = paletteLab[0];
+				float whiteWeight = averageColorWeight(lab, *feltMask, candidate, white, 15.0f);
+
+				weight = whiteWeight * STRIPES_WEIGHT_MULTIPLIER + weight * (1.0f - STRIPES_WEIGHT_MULTIPLIER);
+			}
 
 			if (weight < MIN_WEIGHT_THRESHOLD)
 				weight = 0.0f;
@@ -766,12 +771,17 @@ void MyApplication()
 
 		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined, &feltMask);
 
-		//drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
-		//drawHollowCircles(out, combined, cv::Scalar(255, 255, 255));
+		Mat display = out->clone();
+		drawHollowCircles(&display, circlesH, cv::Scalar(0, 0, 255));
+		imshow("Hough Candidates", display);
 
-		drawAssignedColors(out, assignedList);
-		
-		imshow(fileNames[i], *out);
+		display = out->clone();
+		drawHollowCircles(&display, combined, cv::Scalar(255, 255, 255));
+		imshow("Combined Candidates", display);
+
+		display = out->clone();
+		drawAssignedColors(&display, assignedList);
+		imshow("Recognition", display);
 
 		char pause = cv::waitKey();  // This introduces a delay between frame.  The length of the delay/number can be reduced.
 	}
