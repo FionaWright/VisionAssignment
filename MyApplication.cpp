@@ -28,14 +28,14 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
-void crop(Mat* src, Mat* dst, cv::Point* srcPoints)
+void crop(Mat* src, Mat* dst, cv::Point* srcPoints, cv::Scalar value)
 {
 	cv::Mat mask = cv::Mat::zeros(src->size(), CV_8UC1);
 
 	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
 
 	*dst = *src;
-	dst->setTo(cv::Scalar(0, 0, 0), mask == 0);
+	dst->setTo(value, mask == 0);
 }
 
 enum CandidateSource
@@ -169,7 +169,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 	*dst = feltMask;
 }
 
-std::vector<BallCandidate> detectBallsHough(Mat* image)
+std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 {
 	cv::Mat H, L, S;
 	{
@@ -184,9 +184,6 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 		S = channels[2];
 	}
 
-	cv::Mat feltMask;
-	computeFeltMask(image, &feltMask);
-
 	cv::Mat gray;
 	{
 		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
@@ -195,7 +192,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 		const int kernelSize = 7;
 		const double strength = 1.2;
 		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
-		gray.setTo(0, feltMask);
+		gray.setTo(0, *feltMask);
 	}
 
 	imshow(".", gray);
@@ -316,6 +313,7 @@ enum BallID : uint32_t
 	eOrangeStriped = 13,
 	eGreenStriped = 14,
 	eBrownStriped = 15,
+	eCount = 16
 };
 
 struct AssignedCandidate
@@ -334,6 +332,7 @@ float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, fl
 
 float averageColorWeight(
 	const cv::Mat& labImage,
+	const cv::Mat& feltMask,
 	const BallCandidate& candidate,
 	const cv::Vec3f& expectedLab,
 	float sigma = 15.0f)
@@ -366,7 +365,12 @@ float averageColorWeight(
 			if (circleMask.at<uchar>(y, x) == 0)
 				continue;
 
-			cv::Vec3b pixel = labImage.at<cv::Vec3b>(roi.y + y, roi.x + x);
+			int imgX = roi.x + x;
+			int imgY = roi.y + y;
+			if (feltMask.at<uchar>(imgY, imgX) == 1)
+				continue;
+
+			cv::Vec3b pixel = labImage.at<cv::Vec3b>(imgY, imgX);
 			cv::Vec3f pixelLab(pixel[0] * (100.0f / 255.0f), pixel[1] - 128.0f, pixel[2] - 128.0f);
 
 			totalWeight += colorWeight(pixelLab, expectedLab, sigma);
@@ -491,7 +495,7 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 	return assignment;
 }
 
-std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCandidate>& candidates)
+std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCandidate>& candidates, Mat* feltMask)
 {
 	std::vector<cv::Vec3f> paletteLab;
 	{
@@ -534,33 +538,35 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 		}
 	}
 
-	Mat feltMask;
-	computeFeltMask(image, &feltMask);
-
 	cv::Mat lab;
 	cv::cvtColor(*image, lab, cv::COLOR_BGR2Lab);
 
-	lab.setTo(cv::Scalar(0,0,0), feltMask);
-
-#define NUM_BALLS 16
+	lab.setTo(cv::Scalar(0,0,0), *feltMask);
 
 	std::vector<std::vector<float>> weightMatrix;
+
+	constexpr float RADIUS_MULTIPLIER = 0.75f;
+	constexpr float STRIPES_WEIGHT_MULTIPLIER = 0.6f;
+	constexpr float MIN_WEIGHT_THRESHOLD = 0.001f;
 
 	for (uint32_t i = 0; i < candidates.size(); i++)
 	{
 		BallCandidate candidate = candidates[i];
-		candidate.Radius *= 0.75f; // Exclude edges
+		candidate.Radius *= RADIUS_MULTIPLIER; // Exclude edges
 
 		std::vector<float> weights;
 
-		for (uint32_t j = 0; j < NUM_BALLS; j++)
+		for (uint32_t j = 0; j < BallID::eCount; j++)
 		{
 			cv::Vec3f expectedLab = paletteLab[j];
 			
-			float weight = averageColorWeight(lab, candidate, expectedLab, 15.0f);
+			float weight = averageColorWeight(lab, *feltMask, candidate, expectedLab, 15.0f);
 
 			if (j >= 9)
-				weight *= 0.6f;
+				weight *= STRIPES_WEIGHT_MULTIPLIER;
+
+			if (weight < MIN_WEIGHT_THRESHOLD)
+				weight = 0.0f;
 
 			weights.emplace_back(weight);
 		}
@@ -601,7 +607,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 
 			for (uint32_t i = 0; i < candidates.size(); i++)
 			{
-				for (uint32_t j = 0; j < NUM_BALLS; j++)
+				for (uint32_t j = 0; j < BallID::eCount; j++)
 				{
 					if (i != maxIdx && j != ballId)
 						continue;
@@ -636,11 +642,11 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	{
 		// TODO: If this approach is better, cancel out transpose
 		{
-			std::vector<std::vector<float>> transposed(NUM_BALLS, std::vector<float>(candidates.size()));
+			std::vector<std::vector<float>> transposed(BallID::eCount, std::vector<float>(candidates.size()));
 
 			for (size_t i = 0; i < candidates.size(); ++i)
 			{
-				for (int j = 0; j < NUM_BALLS; ++j)
+				for (int j = 0; j < BallID::eCount; ++j)
 				{
 					transposed[j][i] = weightMatrix[i][j];
 				}
@@ -652,9 +658,9 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 		{
 			//std::vector<float> dummyWeights(candidates.size(), 0.0f);
 
-			for (uint32_t i = 0; i < NUM_BALLS; i++)
+			for (uint32_t i = 0; i < BallID::eCount; i++)
 			{
-				for (uint32_t j = candidates.size(); j < NUM_BALLS; j++)
+				for (uint32_t j = candidates.size(); j < BallID::eCount; j++)
 					weightMatrix[i].emplace_back(0.0f);
 			}
 		}
@@ -663,7 +669,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 
 		for (uint32_t i = 0; i < results.size(); i++)
 		{
-			if (results[i] >= 0 && results[i] < candidates.size())
+			if (results[i] >= 0 && results[i] < candidates.size() && weightMatrix[i][results[i]] > 0.0f)
 			{
 				AssignedCandidate assigned;
 				assigned.Candidate = candidates[results[i]];
@@ -672,8 +678,6 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			}
 		}
 	}
-
-	// TODO: Next steps are hungarian non-greedy selection (Still do solids then stripes? Or have weight based on multiple colors?)
 
 	return assignedList;
 }
@@ -748,15 +752,19 @@ void MyApplication()
 		size_t width = in->cols;
 		size_t height = in->rows;
 
-		crop(in, out, srcPoints);
+		crop(in, out, srcPoints, cv::Scalar(0,0,0));
 
-		std::vector<BallCandidate> circlesH = detectBallsHough(out);
+		cv::Mat feltMask;
+		computeFeltMask(out, &feltMask);
+		crop(&feltMask, &feltMask, srcPoints, cv::Scalar(1,1,1));
+
+		std::vector<BallCandidate> circlesH = detectBallsHough(out, &feltMask);
 
 		std::vector<BallCandidate> candidates;
 		candidates.insert(candidates.end(), circlesH.begin(), circlesH.end());
 		std::vector<BallCandidate> combined = combineCircles(candidates, 21.0f, 8.0f);
 
-		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined);
+		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined, &feltMask);
 
 		//drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
 		//drawHollowCircles(out, combined, cv::Scalar(255, 255, 255));
