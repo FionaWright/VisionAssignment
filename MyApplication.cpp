@@ -53,6 +53,19 @@ struct BallCandidate
 
 std::vector<BallCandidate> detectBallsHough(Mat* image)
 {
+	cv::Mat H, L, S;
+	{
+		cv::Mat hls;
+		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
+
+		std::vector<cv::Mat> channels;
+		cv::split(hls, channels);
+
+		H = channels[0];
+		L = channels[1];
+		S = channels[2];
+	}
+
 	cv::Mat greenMask;
 	{
 		cv::Mat hsv;
@@ -66,15 +79,60 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 		);
 	}
 
-	cv::Mat L;
 	{
-		cv::Mat hls;
-		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
+		cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
 
-		std::vector<cv::Mat> channels;
-		cv::split(hls, channels);
+		cv::Mat inverseEdges;
+		{
+			cv::Mat hls;
+			cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
 
-		L = channels[1];
+			Mat col = hls;
+			//Mat col = H;
+			//Mat col = L;
+			//col.setTo(0, greenMask);
+			cv::GaussianBlur(col, col, cv::Size(7, 7), 1.5);
+
+			cv::Mat edges;
+			cv::Canny(col, edges, 15, 20);
+
+			cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
+			cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
+			cv::morphologyEx(edges, edges, cv::MORPH_ERODE, kernel);
+
+			cv::bitwise_not(edges, inverseEdges);
+
+			//imshow(".", edges);
+		}
+
+		cv::Mat hsv;
+		cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
+
+		hsv.setTo(cv::Scalar(0, 0, 0), inverseEdges == 0);
+
+		cv::Mat floodMask = cv::Mat::zeros(hsv.rows + 2, hsv.cols + 2, CV_8UC1);
+
+		cv::Point seed(600, 400); // TODO: Find stochastically
+
+		cv::Scalar loDiff(5, 25, 25);
+		cv::Scalar upDiff(5, 25, 25);
+
+		cv::floodFill(
+			hsv,
+			floodMask,
+			seed,
+			cv::Scalar(),
+			nullptr,
+			loDiff,
+			upDiff,
+			4 | cv::FLOODFILL_MASK_ONLY | (255 << 8)
+		);
+
+		greenMask = floodMask(cv::Rect(1, 1, hsv.cols, hsv.rows)).clone();
+
+		cv::morphologyEx(greenMask, greenMask, cv::MORPH_OPEN, kernel);
+
+		//imshow(".", greenMask);
 	}
 
 	cv::Mat gray;
@@ -82,22 +140,22 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 		gray = L;
 
-		const int kernelSize = 5;
+		const int kernelSize = 7;
 		const double strength = 1.2;
 		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
-		//gray.setTo(0, greenMask);
+		gray.setTo(0, greenMask);
 	}
 
-	//imshow(".", gray);
+	imshow(".", gray);
 
 	std::vector<BallCandidate> candidates;
 	{
 		const double inverseAccumReso = 1.2;
-		const double minCenterDistance = 33.0;
-		const double upperCannyThreshold = 20;
+		const double minCenterDistance = 10.0;
+		const double upperCannyThreshold = 100;
 		const double accumThreshold = 12.0;
-		const int minRadius = 25;
-		const int maxRadius = 27;
+		const int minRadius = 23;
+		const int maxRadius = 26;
 
 		std::vector<cv::Vec3f> circles;
 
