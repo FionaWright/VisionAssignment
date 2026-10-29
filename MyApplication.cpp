@@ -403,6 +403,94 @@ void printWeightMatrix(const std::vector<std::vector<float>>& weightMatrix)
 	}
 }
 
+std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMatrix)
+{
+	const int N = static_cast<int>(weightMatrix.size());
+	if (N == 0)
+		return {};
+
+	const int M = static_cast<int>(weightMatrix[0].size());
+
+	if (M < N)
+		throw std::invalid_argument("Hungarian algorithm requires columns >= rows");
+
+	// 1-indexed implementation.
+	std::vector<double> u(N + 1), v(M + 1);
+	std::vector<int> p(M + 1), way(M + 1);
+
+	for (int i = 1; i <= N; ++i)
+	{
+		p[0] = i;
+		int j0 = 0;
+		std::vector<double> minv(
+			M + 1, std::numeric_limits<double>::infinity());
+		std::vector<bool> used(M + 1, false);
+
+		do
+		{
+			used[j0] = true;
+			int i0 = p[j0];
+			double delta = std::numeric_limits<double>::infinity();
+			int j1 = 0;
+
+			for (int j = 1; j <= M; ++j)
+			{
+				if (used[j])
+					continue;
+
+				double cost = -weightMatrix[i0 - 1][j - 1];
+				double cur = cost - u[i0] - v[j];
+
+				if (cur < minv[j])
+				{
+					minv[j] = cur;
+					way[j] = j0;
+				}
+
+				if (minv[j] < delta)
+				{
+					delta = minv[j];
+					j1 = j;
+				}
+			}
+
+			for (int j = 0; j <= M; ++j)
+			{
+				if (used[j])
+				{
+					u[p[j]] += delta;
+					v[j] -= delta;
+				}
+				else
+				{
+					minv[j] -= delta;
+				}
+			}
+
+			j0 = j1;
+		} 
+		while (p[j0] != 0);
+
+		do
+		{
+			int j1 = way[j0];
+			p[j0] = p[j1];
+			j0 = j1;
+		} 
+		while (j0 != 0);
+	}
+
+	std::vector<int> assignment(N, -1);
+
+	for (int j = 1; j <= M; ++j)
+	{
+		if (p[j] != 0)
+			assignment[p[j] - 1] = j - 1;
+	}
+
+	return assignment;
+}
+
 std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCandidate>& candidates)
 {
 	std::vector<cv::Vec3f> paletteLab;
@@ -461,7 +549,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	for (uint32_t i = 0; i < candidates.size(); i++)
 	{
 		BallCandidate candidate = candidates[i];
-		candidate.Radius *= 0.9f; // Exclude edges
+		candidate.Radius *= 0.75f; // Exclude edges
 
 		std::vector<float> weights;
 
@@ -470,6 +558,9 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			cv::Vec3f expectedLab = paletteLab[j];
 			
 			float weight = averageColorWeight(lab, candidate, expectedLab, 15.0f);
+
+			if (j >= 9)
+				weight *= 0.6f;
 
 			weights.emplace_back(weight);
 		}
@@ -482,6 +573,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	std::vector<AssignedCandidate> assignedList;
 
 	// Greedy Approach
+	if (false)
 	{
 		auto selectBall = [&](BallID ballId)
 		{
@@ -537,6 +629,48 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 		selectBall(BallID::ePurpleStriped);
 		selectBall(BallID::eBlueStriped);
 		selectBall(BallID::eGreenStriped);
+	}
+
+	// Hungarian Approach
+	if (true)
+	{
+		// TODO: If this approach is better, cancel out transpose
+		{
+			std::vector<std::vector<float>> transposed(NUM_BALLS, std::vector<float>(candidates.size()));
+
+			for (size_t i = 0; i < candidates.size(); ++i)
+			{
+				for (int j = 0; j < NUM_BALLS; ++j)
+				{
+					transposed[j][i] = weightMatrix[i][j];
+				}
+			}
+
+			weightMatrix = transposed;
+		}
+
+		{
+			//std::vector<float> dummyWeights(candidates.size(), 0.0f);
+
+			for (uint32_t i = 0; i < NUM_BALLS; i++)
+			{
+				for (uint32_t j = candidates.size(); j < NUM_BALLS; j++)
+					weightMatrix[i].emplace_back(0.0f);
+			}
+		}
+
+		auto results = hungarianSolver(weightMatrix);
+
+		for (uint32_t i = 0; i < results.size(); i++)
+		{
+			if (results[i] >= 0 && results[i] < candidates.size())
+			{
+				AssignedCandidate assigned;
+				assigned.Candidate = candidates[results[i]];
+				assigned.ID = BallID(i);
+				assignedList.emplace_back(assigned);
+			}
+		}
 	}
 
 	// TODO: Next steps are hungarian non-greedy selection (Still do solids then stripes? Or have weight based on multiple colors?)
