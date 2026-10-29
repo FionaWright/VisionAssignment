@@ -27,10 +27,21 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
+void crop(Mat* src, Mat* dst, cv::Point* srcPoints)
+{
+	cv::Mat mask = cv::Mat::zeros(src->size(), CV_8UC1);
+
+	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
+
+	*dst = *src;
+	dst->setTo(cv::Scalar(0, 0, 0), mask == 0);
+}
+
 enum CandidateSource
 {
 	eHough,
-	eWatershed
+	eContours,
+	eWatershed,
 };
 
 struct BallCandidate
@@ -55,26 +66,38 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 		);
 	}
 
+	cv::Mat L;
+	{
+		cv::Mat hls;
+		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
+
+		std::vector<cv::Mat> channels;
+		cv::split(hls, channels);
+
+		L = channels[1];
+	}
+
 	cv::Mat gray;
 	{
-		cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
+		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
+		gray = L;
 
 		const int kernelSize = 5;
 		const double strength = 1.2;
 		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
-		gray.setTo(0, greenMask);
+		//gray.setTo(0, greenMask);
 	}
 
-	imshow(".", gray);
+	//imshow(".", gray);
 
 	std::vector<BallCandidate> candidates;
 	{
 		const double inverseAccumReso = 1.2;
 		const double minCenterDistance = 33.0;
-		const double upperCannyThreshold = 50;
-		const double accumThreshold = 15.0;
+		const double upperCannyThreshold = 20;
+		const double accumThreshold = 12.0;
 		const int minRadius = 25;
-		const int maxRadius = 32;
+		const int maxRadius = 27;
 
 		std::vector<cv::Vec3f> circles;
 
@@ -96,6 +119,84 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 			candidate.Center = cv::Point(circles[i][0], circles[i][1]);
 			candidate.Radius = circles[i][2];
 			candidate.Source = eHough;
+			candidates.emplace_back(candidate);
+		}
+	}
+
+	return candidates;
+}
+
+std::vector<BallCandidate> detectBallsContours(Mat* image)
+{
+	cv::Mat greenMask;
+	{
+		cv::Mat hsv;
+		cv::cvtColor(*image, hsv, cv::COLOR_BGR2HSV);
+
+		cv::inRange(
+			hsv,
+			cv::Scalar(40, 40, 65),
+			cv::Scalar(90, 255, 255),
+			greenMask
+		);
+	}
+
+	cv::Mat gray;
+	{
+		cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
+
+		const int kernelSize = 5;
+		const double strength = 1.2;
+		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
+		//gray.setTo(0, greenMask);
+	}
+
+	std::vector<std::vector<cv::Point>> contours;
+	{
+		cv::Mat foreground;
+		cv::bitwise_not(greenMask, foreground);
+
+		cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+		cv::morphologyEx(foreground, foreground, cv::MORPH_OPEN, kernel);
+
+		//imshow(".", foreground);
+
+		cv::findContours(foreground, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+	}
+
+	std::vector<BallCandidate> candidates;
+	{
+		for (const auto& contour : contours)
+		{
+			double area = cv::contourArea(contour);
+
+			const float minBallRadius = 25;
+			const float maxBallRadius = 32;
+			if (area < CV_PI * minBallRadius * minBallRadius || area > CV_PI * maxBallRadius * maxBallRadius)
+			{
+				continue;
+			}
+
+			double perimeter = cv::arcLength(contour, true);
+
+			if (perimeter <= 0)
+				continue;
+
+			double circularity = 4.0 * CV_PI * area / (perimeter * perimeter);
+
+			if (circularity < 0.65)
+				continue;
+
+			cv::Point2f center;
+			float radius;
+
+			cv::minEnclosingCircle(contour, center, radius);
+
+			BallCandidate candidate;
+			candidate.Center = center;
+			candidate.Radius = radius;
+			candidate.Source = eContours; 
+
 			candidates.emplace_back(candidate);
 		}
 	}
@@ -388,7 +489,7 @@ void MyApplication()
 		loadImage(in, filePath);
 
 		// NW, NE, SE, SW
-		cv::Point2f srcPoints[4] = {
+		cv::Point srcPoints[4] = {
 			{337,  35},
 			{1570, 21},
 			{1888, 451},
@@ -398,16 +499,25 @@ void MyApplication()
 		size_t width = in->cols;
 		size_t height = in->rows;
 
-		perspectiveTransform(in, out, srcPoints, width, height);
+		crop(in, out, srcPoints);
+		//perspectiveTransform(in, out, srcPoints, width, height);
 
 		std::vector<BallCandidate> circlesH = detectBallsHough(out);
+		std::vector<BallCandidate> circlesC = detectBallsContours(out);
 		std::vector<BallCandidate> circlesWS = detectBallsWatershed(out);
 		std::vector<BallCandidate> circles = combineCircles(circlesH, circlesWS, 20.0f, 8.0f);
 		drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
-		drawHollowCircles(out, circlesWS, cv::Scalar(255, 0, 0));
-		drawHollowCircles(out, circles, cv::Scalar(255, 255, 255));
+		//drawHollowCircles(out, circlesC, cv::Scalar(0, 255, 255));
+		//drawHollowCircles(out, circlesWS, cv::Scalar(255, 0, 0));
+		//drawHollowCircles(out, circles, cv::Scalar(255, 255, 255));
 
 		// TODO: Reject if on felt or net, select best of overlapping circles
+
+		/*
+		* If you have Hough circles, have you tried to CCA into separate units? 
+			Then do a measure of circularity OR calculate the size of the balls (using a HLS channel + counting pixels). All pool balls should be the same size within reason
+			If you have pool balls that are bunched together they should still reasonably stand out against the table so I don’t see why using a HLS channel to define balls wouldn’t work 🤷‍♀️
+		*/
 
 		//nearestNeighbourQuantize(out, out);
 		
