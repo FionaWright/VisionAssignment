@@ -1118,7 +1118,7 @@ void MyApplication()
 	}
 
 	totalScore /= float(s_Config.FileNameList.size());
-	std::cout << "Total Score: " << totalScore << std::endl;
+	std::cout << "Total Score:		      " << totalScore << std::endl;
 }
 
 /*
@@ -1131,4 +1131,18 @@ void MyApplication()
 * Evaluation metrics per image
 * Color detection
 * Figure out if I'm allowed/required to use the training image for information (Ball colors, table position, nets, etc)
+*/
+
+/*
+
+Best Scores:
+
+Table1.jpeg normalized score: 5.650
+Table2.jpeg normalized score: 4.079
+Table3.jpeg normalized score: 4.867
+Table4.jpeg normalized score: 4.443
+Table5.jpeg normalized score: 4.699
+Table6.jpeg normalized score: 2.670
+Total Score:				  29.486
+
 */
