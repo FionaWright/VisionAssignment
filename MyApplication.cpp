@@ -65,6 +65,12 @@ struct Config
 		{1888, 451},
 		{38, 472},
 	};
+	cv::Point2f TablePointsF[4] = { 
+		{337,  35},
+		{1570, 21},
+		{1888, 451},
+		{38, 472},
+	};
 
 	// Felt Mask
 	int FeltMaskMorphKernel = 3;
@@ -124,6 +130,7 @@ struct Config
 
 	// Drawing
 	int CircleThickness = 2;
+	float EvalCircleDrawRadius = 10.0f;
 	std::vector<cv::Vec3b> DrawPalette = {
 		{255, 255, 255}, // White
 		{  0, 255, 255}, // Yellow
@@ -142,6 +149,13 @@ struct Config
 		{  0, 128,   0}, // Green
 		{ 42,  42, 165}, // Brown
 	};
+
+	// Evaluation
+	float MissingBallPenalty = -1.0f;
+	float MissingBallReward = 1.0f;
+	float EvalDistanceThreshold = 100.0f;
+	float EvalDistanceMax = 100.0f;
+	float DistancePenaltyWeight = 0.5f;
 };
 static Config s_Config;
 
@@ -165,6 +179,54 @@ void crop(Mat* src, Mat* dst, cv::Point* srcPoints, cv::Scalar value)
 
 	*dst = src->clone();
 	dst->setTo(value, mask == 0);
+}
+
+void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t width, size_t height)
+{
+	// NW, NE, SE, SW
+	cv::Point2f dstPoints[4] = {
+		{0.0f,          0.0f},
+		{width - 1.0f,   0.0f},
+		{width - 1.0f,   height - 1.0f},
+		{0.0f,           height - 1.0f}
+	};
+
+	cv::Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
+
+	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
+}
+
+void affineTransform(
+	const cv::Mat* src,
+	cv::Mat* dst,
+	const cv::Point2f* srcPoints,
+	size_t width,
+	size_t height)
+{
+	// NW, NE, SE, SW
+	cv::Point2f dstPoints[4] = {
+		{0.0f,          0.0f},
+		{width - 1.0f,   0.0f},
+		{width - 1.0f,   height - 1.0f},
+		{0.0f,           height - 1.0f}
+	};
+
+	cv::Point2f srcTri[3];
+	cv::Point2f dstTri[3];
+
+	srcTri[0] = srcPoints[0];
+	dstTri[0] = dstPoints[0];
+	srcTri[1] = srcPoints[1];
+	dstTri[1] = dstPoints[1];
+	srcTri[2] = srcPoints[3];
+	dstTri[2] = dstPoints[3];
+
+	cv::Mat M = cv::getAffineTransform(srcTri, dstTri);
+
+	cv::Mat warped;
+	cv::warpAffine(*src, warped, M, cv::Size(width, height));
+
+	*dst = warped;
 }
 
 std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const cv::Mat& image, double threshold)
@@ -751,11 +813,186 @@ void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assign
 	}
 }
 
+struct EvalBallPosition
+{
+	int Row;
+	int Column;
+};
+
+struct EvalImageBallPositions
+{
+	std::string Filename;
+	EvalBallPosition Balls[16]; 
+};
+
+static const std::vector<EvalImageBallPositions> s_EvalBallPositions = {
+	{
+		"AllBalls.jpeg",
+		{
+			{253, 908}, {250, 959}, {255, 1013}, {256, 1072},
+			{254, 1132}, {262, 1184}, {256, 1244}, {253, 1307},
+			{329, 901}, {330, 961}, {334, 1130}, {335, 1013},
+			{336, 1067}, {342, 1245}, {345, 1187}, {293, 797}
+		}
+	},
+	{
+		"Table1.jpeg",
+		{
+			{309, 1092}, {1212, 429}, {353, 1174}, {1050, 335},
+			{285, 1211}, {261, 1170}, {352, 1173}, {331, 1132},
+			{240, 1210}, {310, 1170}, {1169, 407}, {281, 1135},
+			{374, 1212}, {360, 1091}, {331, 1213}, {288, 29}
+		}
+	},
+	{
+		"Table2.jpeg",
+		{
+			{282, 1103}, {620, 1224}, {391, 1121}, {310, 1305},
+			{315, 1046}, {202, 621}, {361, 1173}, {331, 1132},
+			{177, 725}, {185, 1269}, {665, 798}, {296, 438},
+			{53, 1235}, {362, 1090}, {399, 1205}, {507, 1169}
+		}
+	},
+	{
+		"Table3.jpeg",
+		{
+			{23, 908}, {616, 1224}, {447, 1199}, {336, 29},
+			{305, 1406}, {210, 621}, {260, 1294}, {226, 1252},
+			{177, 725}, {171, 1270}, {665, 798}, {249, 351},
+			{53, 1233}, {169, 901}, {399, 1201}, {434, 29}
+		}
+	},
+	{
+		"Table4.jpeg",
+		{
+			{23, 908}, {546, 1407}, {444, 1204}, {-1, -1},
+			{305, 1406}, {210, 621}, {260, 1294}, {226, 1252},
+			{181, 724}, {171, 1270}, {665, 798}, {249, 351},
+			{58, 1231}, {169, 901}, {399, 1201}, {88, 1392}
+		}
+	},
+	{
+		"Table5.jpeg",
+		{
+			{535, 23}, {546, 1407}, {444, 1204}, {-1, -1},
+			{305, 1406}, {131, 25}, {260, 1294}, {226, 1252},
+			{538, 72}, {171, 1270}, {665, 798}, {249, 351},
+			{-1, -1}, {169, 901}, {399, 1201}, {608, 26}
+		}
+	},
+	{
+		"Table6.jpeg",
+		{
+			{535, 23}, {477, 1364}, {444, 1204}, {-1, -1},
+			{305, 1406}, {131, 25}, {260, 1294}, {226, 1252},
+			{538, 72}, {171, 1270}, {-1, -1}, {249, 351},
+			{-1, -1}, {169, 901}, {399, 1201}, {629, 947}
+		}
+	}
+};
+
+// TODO: Change ball order to match?
+int evalBallIdToBallId(int idx)
+{
+	if (idx == 15)
+		return 0;
+	return idx + 1;
+}
+
+int ballIdToEvalBallId(int idx)
+{
+	if (idx == 0)
+		return 15;
+	return idx - 1;
+}
+
+float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<AssignedCandidate>& candidates)
+{
+	float totalScore = 0.0f;
+
+	for (int i = 0; i < BallID::eCount; i++)
+	{
+		BallCandidate* candidate = nullptr;
+		for (int j = 0; j < candidates.size(); j++)
+		{
+			if (candidates[j].ID == i)
+			{
+				candidate = &candidates[j].Candidate;
+				break;
+			}
+		}
+
+		int evalBallIdx = ballIdToEvalBallId(i);
+		EvalBallPosition evalPos = eval.Balls[evalBallIdx];
+
+		bool foundCandidate = candidate != nullptr;
+		bool ballOnTable = evalPos.Row != -1 && evalPos.Column != -1;
+
+		if (!foundCandidate && !ballOnTable)
+		{
+			totalScore += s_Config.MissingBallReward;
+			continue;
+		}
+
+		if (foundCandidate != ballOnTable)
+		{
+			std::cout << "WARNING: False Positive / Negative" << std::endl;
+
+			totalScore += s_Config.MissingBallPenalty;
+			continue;
+		}
+
+		float imageCoordX = evalPos.Column + s_Config.TablePoints[0].x;
+		float imageCoordY = evalPos.Row + s_Config.TablePoints[0].y;
+
+		float distX = (candidate->Center.x - imageCoordX);
+		float distY = (candidate->Center.y - imageCoordY);
+		float lenSqr = distX * distX + distY * distY;
+
+		lenSqr = std::max(s_Config.EvalDistanceMax, lenSqr);
+		totalScore += lenSqr * s_Config.DistancePenaltyWeight;
+	}
+
+	return totalScore / float(BallID::eCount); // Reduce magnitude
+}
+
+void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
+{
+	for (int i = 0; i < BallID::eCount; i++)
+	{
+		int evalBallIdx = ballIdToEvalBallId(i);
+		EvalBallPosition evalPos = eval.Balls[evalBallIdx];
+
+		bool ballOnTable = evalPos.Row != -1 && evalPos.Column != -1;
+
+		if (!ballOnTable)
+			continue;
+
+		int imageCoordX = evalPos.Column + s_Config.TablePoints[0].x;
+		int imageCoordY = evalPos.Row + s_Config.TablePoints[0].y;
+
+		//int imageCoordX = evalPos.Column;
+		//int imageCoordY = evalPos.Row;
+		cv::Point p(imageCoordX, imageCoordY);
+
+		cv::Vec3b color = s_Config.DrawPalette[i];
+		cv::circle(*image, p, s_Config.EvalCircleDrawRadius, color, s_Config.CircleThickness);
+
+		if (BallIdIsStriped(i))
+		{
+			cv::circle(*image, p, s_Config.EvalCircleDrawRadius, cv::Scalar(255, 255, 255), s_Config.CircleThickness - 1);
+		}
+	}
+}
+
 void MyApplication()
 {
 	int imageCount = sizeof(s_Config.FileNameList) / sizeof(s_Config.FileNameList[0]);
 	Mat* inputImages = new Mat[imageCount];
 	Mat* outputImages = new Mat[imageCount];
+
+	float totalScore = 0.0f;
+	std::vector<float> scores;
 
 	for (int i = 0; i < imageCount; i++)
 	{
@@ -794,8 +1031,26 @@ void MyApplication()
 		drawAssignedColors(&display, assignedList);
 		imshow("Recognition", display);
 
-		char pause = cv::waitKey();  // This introduces a delay between frame.  The length of the delay/number can be reduced.
+		float score = EvaluatePerformance(s_EvalBallPositions[i], assignedList);
+		scores.emplace_back(score);
+		totalScore += score;
+
+		display = out->clone();
+		//affineTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
+		drawEvalCircles(&display, s_EvalBallPositions[i]);
+		imshow("Eval", display);
+
+		char pause = cv::waitKey();
 	}
+
+	for (int i = 0; i < imageCount; i++)
+	{
+		float score = scores[i] / float(s_Config.FileNameList.size());
+		std::cout << s_Config.FileNameList[i] << " score: " << score << std::endl;
+	}
+
+	totalScore /= float(s_Config.FileNameList.size());
+	std::cout << "Total Score: " << totalScore << std::endl;
 }
 
 /*
