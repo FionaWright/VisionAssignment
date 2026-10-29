@@ -196,12 +196,7 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
 
-void affineTransform(
-	const cv::Mat* src,
-	cv::Mat* dst,
-	const cv::Point2f* srcPoints,
-	size_t width,
-	size_t height)
+cv::Point2f perspectiveTransform(cv::Point2f point, cv::Point2f* srcPoints, size_t width, size_t height)
 {
 	// NW, NE, SE, SW
 	cv::Point2f dstPoints[4] = {
@@ -211,22 +206,24 @@ void affineTransform(
 		{0.0f,           height - 1.0f}
 	};
 
-	cv::Point2f srcTri[3];
-	cv::Point2f dstTri[3];
+	cv::Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
 
-	srcTri[0] = srcPoints[0];
-	dstTri[0] = dstPoints[0];
-	srcTri[1] = srcPoints[1];
-	dstTri[1] = dstPoints[1];
-	srcTri[2] = srcPoints[3];
-	dstTri[2] = dstPoints[3];
+	std::vector<cv::Point2f> pointVec = { point };
+	std::vector<cv::Point2f> dst;
 
-	cv::Mat M = cv::getAffineTransform(srcTri, dstTri);
+	cv::perspectiveTransform(pointVec, dst, H);
 
-	cv::Mat warped;
-	cv::warpAffine(*src, warped, M, cv::Size(width, height));
+	return dst[0];
+}
 
-	*dst = warped;
+cv::Point2f transformToEvalTable(cv::Point2f point, cv::Point2f* srcPoints, size_t width, size_t height)
+{
+	point = perspectiveTransform(point, srcPoints, width, height);
+
+	point.x *= 1434.0f / float(width);
+	point.y *= 683.0f / float(height);
+
+	return point;
 }
 
 std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const cv::Mat& image, double threshold)
@@ -829,69 +826,153 @@ static const std::vector<EvalImageBallPositions> s_EvalBallPositions = {
 	{
 		"AllBalls.jpeg",
 		{
-			{293, 797} , {253, 908}, {250, 959}, {255, 1013}, {256, 1072},
-			{254, 1132}, {262, 1184}, {256, 1244}, {253, 1307},
-			{329, 901}, {330, 961}, {334, 1130}, {335, 1013},
-			{336, 1067}, {345, 1187}, {342, 1245}
+			{293, 797},
+			{253, 908},
+			{250, 959},
+			{255, 1013},
+			{256, 1072},
+			{254, 1132},
+			{262, 1184},
+			{256, 1244},
+			{253, 1307},
+			{329, 901},
+			{330, 961},
+			{335, 1013},
+			{336, 1067},
+			{334, 1130},
+			{345, 1187},
+			{342, 1245}
 		}
 	},
 	{
 		"Table1.jpeg",
 		{
-			{288, 29}, {309, 1092}, {1212, 429}, {353, 1174}, {1050, 335},
-			{285, 1211}, {261, 1170}, {352, 1173}, {331, 1132},
-			{240, 1210}, {310, 1170}, {1169, 407}, {281, 1135},
-			{374, 1212}, {360, 1091}, {331, 1213}
+			{288, 29},
+			{309, 1092},
+			{429, 1212},
+			{374, 1132}, // 3
+			{335, 1050},
+			{285, 1211},
+			{261, 1170},
+			{352, 1173},
+			{331, 1132}, // 8
+			{240, 1210},
+			{310, 1170},
+			{407, 1169},
+			{281, 1135},
+			{374, 1212}, // 13
+			{360, 1091},
+			{331, 1213}
 		}
 	},
 	{
 		"Table2.jpeg",
 		{
-			{507, 1169}, {282, 1103}, {620, 1224}, {391, 1121}, {310, 1305},
-			{315, 1046}, {202, 621}, {361, 1173}, {331, 1132},
-			{177, 725}, {185, 1269}, {665, 798}, {296, 438},
-			{53, 1235}, {362, 1090}, {399, 1205}
+			{507, 1169},
+			{282, 1103},
+			{620, 1224},
+			{391, 1121},
+			{315, 1046},
+			{310, 1305},
+			{202, 621},
+			{361, 1173},
+			{331, 1132},
+			{177, 725},
+			{185, 1269},
+			{665, 798},
+			{296, 438},
+			{53, 1235},
+			{362, 1090},
+			{399, 1205}
 		}
 	},
 	{
 		"Table3.jpeg",
 		{
-			{434, 29}, {23, 908}, {616, 1224}, {447, 1199}, {336, 29},
-			{305, 1406}, {210, 621}, {260, 1294}, {226, 1252},
-			{177, 725}, {171, 1270}, {665, 798}, {249, 351},
-			{53, 1233}, {169, 901}, {399, 1201}
+			{434, 29},
+			{23, 908},
+			{616, 1224},
+			{447, 1199},
+			{336, 29},
+			{305, 1406},
+			{210, 621},
+			{260, 1294},
+			{226, 1252},
+			{177, 725},
+			{171, 1270},
+			{665, 798},
+			{249, 351},
+			{53, 1233},
+			{169, 901},
+			{399, 1201}
 		}
 	},
 	{
 		"Table4.jpeg",
 		{
-			{88, 1392}, {23, 908}, {546, 1407}, {444, 1204}, {-1, -1},
-			{305, 1406}, {210, 621}, {260, 1294}, {226, 1252},
-			{181, 724}, {171, 1270}, {665, 798}, {249, 351},
-			{58, 1231}, {169, 901}, {399, 1201}
+			{88, 1392},
+			{23, 908},
+			{546, 1407},
+			{444, 1204},
+			{-1, -1},
+			{305, 1406},
+			{210, 621},
+			{260, 1294},
+			{226, 1252},
+			{181, 724},
+			{171, 1270},
+			{665, 798},
+			{249, 351},
+			{58, 1231},
+			{169, 901},
+			{399, 1201}
 		}
 	},
 	{
 		"Table5.jpeg",
 		{
-			{608, 26}, {535, 23}, {546, 1407}, {444, 1204}, {-1, -1},
-			{305, 1406}, {131, 25}, {260, 1294}, {226, 1252},
-			{538, 72}, {171, 1270}, {665, 798}, {249, 351},
-			{-1, -1}, {169, 901}, {399, 1201}
+			{608, 26},
+			{535, 23},
+			{546, 1407},
+			{444, 1204},
+			{-1, -1},
+			{305, 1406},
+			{131, 25},
+			{260, 1294},
+			{226, 1252},
+			{538, 72},
+			{171, 1270},
+			{665, 798},
+			{249, 351},
+			{-1, -1},
+			{169, 901},
+			{399, 1201}
 		}
 	},
 	{
 		"Table6.jpeg",
 		{
-			{629, 947}, {535, 23}, {477, 1364}, {444, 1204}, {-1, -1},
-			{305, 1406}, {131, 25}, {260, 1294}, {226, 1252},
-			{538, 72}, {171, 1270}, {-1, -1}, {249, 351},
-			{-1, -1}, {169, 901}, {399, 1201}
+			{629, 947},
+			{535, 23},
+			{477, 1364},
+			{444, 1204},
+			{-1, -1},
+			{305, 1406},
+			{131, 25},
+			{260, 1294},
+			{226, 1252},
+			{538, 72},
+			{171, 1270},
+			{-1, -1},
+			{249, 351},
+			{-1, -1},
+			{169, 901},
+			{399, 1201}
 		}
 	}
 };
 
-float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<AssignedCandidate>& candidates)
+float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<AssignedCandidate>& candidates, size_t width, size_t height)
 {
 	float totalScore = 0.0f;
 
@@ -926,14 +1007,17 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 			continue;
 		}
 
-		float imageCoordX = evalPos.Column + s_Config.TablePoints[0].x;
-		float imageCoordY = evalPos.Row + s_Config.TablePoints[0].y;
+		float imageCoordX = evalPos.Column;
+		float imageCoordY = evalPos.Row;
 
-		float distX = (candidate->Center.x - imageCoordX);
-		float distY = (candidate->Center.y - imageCoordY);
+		cv::Point2f obsPoint(candidate->Center.x, candidate->Center.y);
+		obsPoint = transformToEvalTable(obsPoint, s_Config.TablePointsF, width, height);
+
+		float distX = (obsPoint.x - imageCoordX);
+		float distY = (obsPoint.y - imageCoordY);
 		float lenSqr = distX * distX + distY * distY;
 
-		lenSqr = std::max(s_Config.EvalDistanceMax, lenSqr);
+		lenSqr = std::min(s_Config.EvalDistanceMax, lenSqr);
 		totalScore += lenSqr * s_Config.DistancePenaltyWeight;
 	}
 
@@ -970,14 +1054,13 @@ void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
 
 void MyApplication()
 {
-	int imageCount = sizeof(s_Config.FileNameList) / sizeof(s_Config.FileNameList[0]);
-	Mat* inputImages = new Mat[imageCount];
-	Mat* outputImages = new Mat[imageCount];
+	Mat* inputImages = new Mat[s_Config.FileNameList.size()];
+	Mat* outputImages = new Mat[s_Config.FileNameList.size()];
 
 	float totalScore = 0.0f;
 	std::vector<float> scores;
 
-	for (int i = 0; i < imageCount; i++)
+	for (int i = 0; i < s_Config.FileNameList.size(); i++)
 	{
 		Mat* in = &inputImages[i];
 		Mat* out = &outputImages[i];
@@ -1014,9 +1097,10 @@ void MyApplication()
 		drawAssignedColors(&display, assignedList);
 		imshow("Recognition", display);
 
-		float score = EvaluatePerformance(s_EvalBallPositions[i], assignedList);
+		float score = EvaluatePerformance(s_EvalBallPositions[i], assignedList, width, height);
 		scores.emplace_back(score);
 		totalScore += score;
+		std::cout << s_Config.FileNameList[i] << " score: " << score << std::endl;
 
 		display = out->clone();
 		perspectiveTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
@@ -1024,13 +1108,13 @@ void MyApplication()
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
 		imshow("Eval", display);
 
-		char pause = cv::waitKey();
+		//char pause = cv::waitKey();
 	}
 
-	for (int i = 0; i < imageCount; i++)
+	for (int i = 0; i < s_Config.FileNameList.size(); i++)
 	{
 		float score = scores[i] / float(s_Config.FileNameList.size());
-		std::cout << s_Config.FileNameList[i] << " score: " << score << std::endl;
+		std::cout << s_Config.FileNameList[i] << " normalized score: " << score << std::endl;
 	}
 
 	totalScore /= float(s_Config.FileNameList.size());
