@@ -419,31 +419,30 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 {
 	std::vector<cv::Vec3f> paletteLab;
 	{
-		// TODO: Extract from training data?
-		cv::Vec3b rgbPalette[] = {
-			{255, 255, 255}, // White
-			{255, 255,   0}, // Yellow
-			{  0,   0, 255}, // Blue 
-			{255,   0,   0}, // Red
-			{128,   0, 128}, // Purple
-			{255, 165,   0}, // Orange
-			{  0, 128,   0}, // Green
-			{165,  42,  42}, // Brown
-			{  0,   0,   0}, // Black
-			{255, 255,   0}, // Yellow
-			{  0,   0, 255}, // Blue 
-			{255,   0,   0}, // Red
-			{128,   0, 128}, // Purple
-			{255, 165,   0}, // Orange
-			{  0, 128,   0}, // Green
-			{165,  42,  42}, // Brown
+		cv::Vec3f paletteF[] = {
+			{0.9f,  0.8f,  0.5f},  // 00: White
+			{0.9f,  0.5f,  0.0f},  // 01: Yellow
+			{0.0f,  0.0f,  0.3f},  // 02: Blue
+			{0.9f,  0.0f,  0.0f},  // 03: Red
+			{0.05f, 0.0f,  0.1f},  // 04: Purple
+			{0.9f,  0.15f, 0.0f},  // 05: Orange
+			{0.0f,  0.1f,  0.0f},  // 06: Green
+			{0.3f,  0.05f, 0.05f}, // 07: Brown
+			{0.0f,  0.0f,  0.0f},  // 08: Black
+			{0.9f,  0.5f,  0.0f},  // 09: Yellow stripe
+			{0.0f,  0.0f,  0.3f},  // 10: Blue stripe
+			{0.9f,  0.0f,  0.0f},  // 11: Red stripe
+			{0.05f, 0.0f,  0.1f},  // 12: Purple stripe
+			{0.9f,  0.15f, 0.0f},  // 13: Orange stripe
+			{0.0f,  0.1f,  0.0f},  // 14: Green stripe
+			{0.3f,  0.05f, 0.05f}  // 15: Brown stripe
 		};
 
-		for (const auto& rgb : rgbPalette)
+		for (const auto& rgb : paletteF)
 		{
 			cv::Mat pixel(1, 1, CV_8UC3);
 			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(
-				rgb[2], rgb[1], rgb[0]
+				255*rgb[2], 255 * rgb[1], 255 * rgb[0]
 			); // RGB -> BGR
 
 			cv::Mat lab;
@@ -530,6 +529,9 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			}
 		};
 
+	selectBall(BallID::eWhite);
+	selectBall(BallID::eBlack);
+
 	selectBall(BallID::eYellowSolid);
 	selectBall(BallID::eOrangeSolid);
 	selectBall(BallID::eRedSolid);
@@ -538,16 +540,13 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	selectBall(BallID::eBlueSolid);
 	selectBall(BallID::eGreenSolid);
 
-	selectBall(BallID::eWhite);
-	selectBall(BallID::eBlack);
-
-	//selectBall(BallID::eYellowStriped);
-	//selectBall(BallID::eOrangeStriped);
-	//selectBall(BallID::eRedStriped);
-	//selectBall(BallID::eBrownStriped);
-	//selectBall(BallID::ePurpleStriped);
-	//selectBall(BallID::eBlueStriped);
-	//selectBall(BallID::eGreenStriped);
+	selectBall(BallID::eYellowStriped);
+	selectBall(BallID::eOrangeStriped);
+	selectBall(BallID::eRedStriped);
+	selectBall(BallID::eBrownStriped);
+	selectBall(BallID::ePurpleStriped);
+	selectBall(BallID::eBlueStriped);
+	selectBall(BallID::eGreenStriped);
 
 	return assignedList;
 }
