@@ -57,7 +57,7 @@ struct Config
 		"Table5.jpeg",
 		"Table6.jpeg"
 	};
-	bool RunAllImages = true;
+	bool RunAllImages = false;
 
 	// Table
 	cv::Point TablePoints[4] = { // NW, NE, SE, SW
@@ -94,13 +94,13 @@ struct Config
 	float HoughGaussianStrength = 1.2f;
 	double HoughInverseAccumReso = 1.2;
 	double HoughMinCenterDistance = 10.0;
-	double HoughUpperCannyThreshold = 60;
-	double HoughAccumThreshold = 12.0;
+	double HoughUpperCannyThreshold = 100;
+	double HoughAccumThreshold = 9.0;
 	int HoughMinRadius = 23;
-	int HoughMaxRadius = 26;
+	int HoughMaxRadius = 25;
 
 	// Candidate Filters
-	float CandidateFilterNonZeroThreshold = 1.0f; // TODO
+	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateCombineDistanceThreshold = 21.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
@@ -395,7 +395,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 		}
 	}
 
-	candidates = filterCandidates(candidates, gray, 0.6f);
+	candidates = filterCandidates(candidates, gray, s_Config.CandidateFilterNonZeroThreshold);
 
 	return candidates;
 }
@@ -1114,7 +1114,7 @@ void MyApplication()
 		perspectiveTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
 		cv::resize(display, display, cv::Size(1434, 683));
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
-		imshow("Eval", display);
+		//imshow("Eval", display);
 
 		if (!s_Config.RunAllImages)
 			cv::waitKey();
@@ -1146,13 +1146,13 @@ void MyApplication()
 
 Best Scores:
 
-AllBalls.jpeg normalized score: 3.079
-Table1.jpeg normalized score: 5.650
-Table2.jpeg normalized score: 4.079
-Table3.jpeg normalized score: 4.867
-Table4.jpeg normalized score: 4.443
-Table5.jpeg normalized score: 4.463
-Table6.jpeg normalized score: 2.670
-Total Score:                  29.251
+AllBalls.jpeg normalized score: 0.940
+Table1.jpeg normalized score: 5.704
+Table2.jpeg normalized score: 3.224
+Table3.jpeg normalized score: 3.206
+Table4.jpeg normalized score: 2.381
+Table5.jpeg normalized score: 4.195
+Table6.jpeg normalized score: 3.139
+Total Score:                  22.788
 
 */
