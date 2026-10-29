@@ -153,8 +153,8 @@ struct Config
 	};
 
 	// Evaluation
-	float MissingBallPenalty = -1.0f;
-	float MissingBallReward = 1.0f;
+	float MissingBallPenalty = 10.0f;
+	float MissingBallReward = -10.0f;
 	float EvalDistanceThreshold = 100.0f;
 	float EvalDistanceMax = 100.0f;
 	float DistancePenaltyWeight = 0.5f;
@@ -232,6 +232,14 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 {
 	std::vector<BallCandidate> filtered;
 
+	cv::Mat nonZeroMask;
+	if (image.channels() == 3)
+		cv::cvtColor(image, nonZeroMask, cv::COLOR_BGR2GRAY);
+	else
+		nonZeroMask = image;
+
+	cv::threshold(nonZeroMask, nonZeroMask, 0, 255, cv::THRESH_BINARY);
+
 	cv::Mat circleMask = cv::Mat::zeros(image.size(), CV_8UC1);
 
 	for (const auto& candidate : candidates)
@@ -259,7 +267,7 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 			continue;
 
 		cv::Mat intersection;
-		cv::bitwise_and(image, circleMask, intersection);
+		cv::bitwise_and(nonZeroMask, circleMask, intersection);
 
 		double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
 
@@ -394,8 +402,6 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 			candidates.emplace_back(candidate);
 		}
 	}
-
-	candidates = filterCandidates(candidates, gray, s_Config.CandidateFilterNonZeroThreshold);
 
 	return candidates;
 }
@@ -1083,9 +1089,14 @@ void MyApplication()
 
 		cv::Mat feltMask;
 		computeFeltMask(out, &feltMask);
-		crop(&feltMask, &feltMask, s_Config.TablePoints, cv::Scalar(1,1,1));
+		crop(&feltMask, &feltMask, s_Config.TablePoints, 255);
 
 		std::vector<BallCandidate> circlesH = detectBallsHough(out, &feltMask);
+
+		Mat filterMask = out->clone();
+		filterMask.setTo(0, feltMask);
+		//crop(&filterMask, &filterMask, s_Config.TablePoints, 255); // TODO: ?
+		circlesH = filterCandidates(circlesH, filterMask, s_Config.CandidateFilterNonZeroThreshold);
 
 		std::vector<BallCandidate> candidates;
 		candidates.insert(candidates.end(), circlesH.begin(), circlesH.end());
@@ -1147,12 +1158,12 @@ void MyApplication()
 Best Scores:
 
 AllBalls.jpeg normalized score: 0.940
-Table1.jpeg normalized score: 5.704
-Table2.jpeg normalized score: 3.224
-Table3.jpeg normalized score: 3.206
-Table4.jpeg normalized score: 2.381
-Table5.jpeg normalized score: 4.195
-Table6.jpeg normalized score: 3.139
-Total Score:                  22.788
+Table1.jpeg normalized score: 5.802
+Table2.jpeg normalized score: 3.519
+Table3.jpeg normalized score: 3.697
+Table4.jpeg normalized score: 2.971
+Table5.jpeg normalized score: 4.391
+Table6.jpeg normalized score: 3.237
+Total Score:                  24.556
 
 */
