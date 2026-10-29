@@ -57,6 +57,7 @@ struct Config
 		"Table5.jpeg",
 		"Table6.jpeg"
 	};
+	bool RunAllImages = true;
 
 	// Table
 	cv::Point TablePoints[4] = { // NW, NE, SE, SW
@@ -102,6 +103,7 @@ struct Config
 	float CandidateFilterNonZeroThreshold = 1.0f; // TODO
 	float CandidateCombineDistanceThreshold = 21.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
+	float OverlapRejectionThreshold = 1.0f;
 
 	// Recognition
 	float LabGaussianStdDev = 1.5f;
@@ -455,7 +457,7 @@ float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, fl
 
 float averageColorWeight(
 	const cv::Mat& labImage,
-	const cv::Mat& feltMask,
+	const cv::Mat& discardMask,
 	const BallCandidate& candidate,
 	const cv::Vec3f& expectedLab,
 	float sigma = s_Config.LabGaussianStdDev)
@@ -490,7 +492,7 @@ float averageColorWeight(
 
 			int imgX = roi.x + x;
 			int imgY = roi.y + y;
-			if (feltMask.at<uchar>(imgY, imgX) == 1)
+			if (discardMask.at<uchar>(imgY, imgX) == 1)
 				continue;
 
 			cv::Vec3b pixel = labImage.at<cv::Vec3b>(imgY, imgX);
@@ -624,7 +626,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 		for (const auto& rgb : s_Config.RecognitionPalette)
 		{
 			cv::Mat pixel(1, 1, CV_8UC3);
-			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(255*rgb[2], 255 * rgb[1], 255 * rgb[0]); 
+			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(255 * rgb[2], 255 * rgb[1], 255 * rgb[0]); 
 
 			cv::Mat lab;
 			cv::cvtColor(pixel, lab, cv::COLOR_BGR2Lab);
@@ -642,8 +644,6 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	cv::Mat lab;
 	cv::cvtColor(*image, lab, cv::COLOR_BGR2Lab);
 
-	lab.setTo(cv::Scalar(0,0,0), *feltMask);
-
 	std::vector<std::vector<float>> weightMatrix;
 
 	for (uint32_t i = 0; i < candidates.size(); i++)
@@ -651,18 +651,29 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 		BallCandidate candidate = candidates[i];
 		candidate.Radius *= s_Config.RecognitionRadiusMult; // Exclude edges
 
+		// Discard ball contributions that overlap closer to the camera
+		Mat discardMask = feltMask->clone();
+		for (uint32_t other = 0; other < candidates.size(); other++)
+		{
+			float yDist = candidates[other].Center.y - candidates[i].Center.y;
+			if (other == i || yDist < s_Config.OverlapRejectionThreshold)
+				continue;
+
+			cv::circle(discardMask, candidates[other].Center, candidates[other].Radius, 255, cv::FILLED);
+		}
+
 		std::vector<float> weights;
 
 		for (uint32_t j = 0; j < BallID::eCount; j++)
 		{
 			cv::Vec3f expectedLab = paletteLab[j];
 			
-			float weight = averageColorWeight(lab, *feltMask, candidate, expectedLab, 15.0f);
+			float weight = averageColorWeight(lab, discardMask, candidate, expectedLab, 15.0f);
 
-			if (j >= 9)
+			if (BallIdIsStriped(j))
 			{
 				cv::Vec3f white = paletteLab[0];
-				float whiteWeight = averageColorWeight(lab, *feltMask, candidate, white, 15.0f);
+				float whiteWeight = averageColorWeight(lab, discardMask, candidate, white, 15.0f);
 
 				weight = whiteWeight * s_Config.RecognitionStripesWeight + weight * (1.0f - s_Config.RecognitionStripesWeight);
 			}
@@ -1035,9 +1046,6 @@ void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
 		if (!ballOnTable)
 			continue;
 
-		//int imageCoordX = evalPos.Column + s_Config.TablePoints[0].x;
-		//int imageCoordY = evalPos.Row + s_Config.TablePoints[0].y;
-
 		int imageCoordX = evalPos.Column;
 		int imageCoordY = evalPos.Row;
 		cv::Point p(imageCoordX, imageCoordY);
@@ -1108,7 +1116,8 @@ void MyApplication()
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
 		imshow("Eval", display);
 
-		//char pause = cv::waitKey();
+		if (!s_Config.RunAllImages)
+			cv::waitKey();
 	}
 
 	for (int i = 0; i < s_Config.FileNameList.size(); i++)
@@ -1137,12 +1146,13 @@ void MyApplication()
 
 Best Scores:
 
+AllBalls.jpeg normalized score: 3.079
 Table1.jpeg normalized score: 5.650
 Table2.jpeg normalized score: 4.079
 Table3.jpeg normalized score: 4.867
 Table4.jpeg normalized score: 4.443
-Table5.jpeg normalized score: 4.699
+Table5.jpeg normalized score: 4.463
 Table6.jpeg normalized score: 2.670
-Total Score:				  29.486
+Total Score:                  29.251
 
 */
