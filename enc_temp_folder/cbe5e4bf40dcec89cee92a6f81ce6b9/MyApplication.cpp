@@ -140,8 +140,8 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 		gray = L;
 
-		const int kernelSize = 7;
-		const double strength = 1.2;
+		const int kernelSize = 5;
+		const double strength = 1.0;
 		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
 		gray.setTo(0, greenMask);
 	}
@@ -152,7 +152,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 	{
 		const double inverseAccumReso = 1.2;
 		const double minCenterDistance = 10.0;
-		const double upperCannyThreshold = 100;
+		const double upperCannyThreshold = 60;
 		const double accumThreshold = 12.0;
 		const int minRadius = 23;
 		const int maxRadius = 26;
@@ -525,7 +525,7 @@ void MyApplication()
 {
 	const char* folderPath = "Media/Pool/";
 	const char* fileNames[] = {
-		"AllBalls.jpeg",
+		//"AllBalls.jpeg",
 		"Table1.jpeg",
 		"Table2.jpeg",
 		"Table3.jpeg",
