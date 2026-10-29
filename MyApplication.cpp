@@ -3,41 +3,6 @@
 #include <opencv2/opencv.hpp>
 #include <cmath>
 
-void loadImage(Mat* image, const std::string& path)
-{
-	*image = imread(path, -1);
-
-	if (image->empty())
-	{
-		std::cout << "Could not open " << path << std::endl;
-	}
-}
-
-void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t width, size_t height)
-{
-	// NW, NE, SE, SW
-	cv::Point2f dstPoints[4] = {
-		{0.0f,          0.0f},
-		{width - 1.0f,   0.0f},
-		{width - 1.0f,   height - 1.0f},
-		{0.0f,           height - 1.0f}
-	};
-
-	cv::Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
-
-	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
-}
-
-void crop(Mat* src, Mat* dst, cv::Point* srcPoints, cv::Scalar value)
-{
-	cv::Mat mask = cv::Mat::zeros(src->size(), CV_8UC1);
-
-	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
-
-	*dst = src->clone();
-	dst->setTo(value, mask == 0);
-}
-
 enum CandidateSource
 {
 	eHough,
@@ -49,8 +14,158 @@ struct BallCandidate
 {
 	cv::Point2f Center;
 	float Radius;
-	CandidateSource Source;  
+	CandidateSource Source;
 };
+
+enum BallID : uint32_t
+{
+	eWhite = 0,
+	eYellowSolid = 1,
+	eBlueSolid = 2,
+	eRedSolid = 3,
+	ePurpleSolid = 4,
+	eOrangeSolid = 5,
+	eGreenSolid = 6,
+	eBrownSolid = 7,
+	eBlack = 8,
+	eYellowStriped = 9,
+	eBlueStriped = 10,
+	eRedStriped = 11,
+	ePurpleStriped = 12,
+	eOrangeStriped = 13,
+	eGreenStriped = 14,
+	eBrownStriped = 15,
+	eCount = 16
+};
+
+struct AssignedCandidate
+{
+	BallCandidate Candidate;
+	BallID ID;
+};
+
+struct Config
+{
+	// Input
+	const char* FolderPath = "Media/Pool/";
+	std::vector<const char*> FileNameList = {
+		"AllBalls.jpeg",
+		"Table1.jpeg",
+		"Table2.jpeg",
+		"Table3.jpeg",
+		"Table4.jpeg",
+		"Table5.jpeg",
+		"Table6.jpeg"
+	};
+
+	// Table
+	cv::Point TablePoints[4] = { // NW, NE, SE, SW
+		{337,  35},
+		{1570, 21},
+		{1888, 451},
+		{38, 472},
+	};
+
+	// Felt Mask
+	int FeltMaskMorphKernel = 3;
+	int FeltMaskGaussianKernel = 7;
+	float FeltMaskGaussianStrength = 1.5f;
+
+	// Canny
+	int CannyWeakThreshold = 15;
+	int CannyStrongThreshold = 20;
+	int CannyNumDilations = 2;
+	int CannyNumErosions = 1;
+
+	// Flood Fill
+	float FloodFillToleranceHue = 5;
+	float FloodFillToleranceLightness = 25;
+	float FloodFillToleranceValue = 25;
+
+	// Hough Transform
+	int HoughGaussianKernel = 7;
+	float HoughGaussianStrength = 1.2f;
+	double HoughInverseAccumReso = 1.2;
+	double HoughMinCenterDistance = 10.0;
+	double HoughUpperCannyThreshold = 60;
+	double HoughAccumThreshold = 12.0;
+	int HoughMinRadius = 23;
+	int HoughMaxRadius = 26;
+
+	// Candidate Filters
+	float CandidateFilterNonZeroThreshold = 1.0f; // TODO
+	float CandidateCombineDistanceThreshold = 21.0f;
+	float CandidateCombineRadiusThreshold = 8.0f;
+
+	// Recognition
+	float LabGaussianStdDev = 1.5f;
+	float RecognitionRadiusMult = 0.8f;
+	float RecognitionStripesWeight = 0.3f;
+	float RecognitionMinWeightThreshold = 0.001f;
+	bool UseHungarianSolver = true;
+	std::vector<cv::Vec3f> RecognitionPalette = {
+		{0.9f,  0.8f,  0.5f},  // 00: White
+		{0.9f,  0.5f,  0.0f},  // 01: Yellow
+		{0.0f,  0.0f,  0.3f},  // 02: Blue
+		{0.9f,  0.0f,  0.0f},  // 03: Red
+		{0.05f, 0.0f,  0.1f},  // 04: Purple
+		{0.9f,  0.15f, 0.0f},  // 05: Orange
+		{0.0f,  0.1f,  0.0f},  // 06: Green
+		{0.3f,  0.05f, 0.05f}, // 07: Brown
+		{0.0f,  0.0f,  0.0f},  // 08: Black
+		{0.9f,  0.5f,  0.0f},  // 09: Yellow stripe
+		{0.0f,  0.0f,  0.3f},  // 10: Blue stripe
+		{0.9f,  0.0f,  0.0f},  // 11: Red stripe
+		{0.05f, 0.0f,  0.1f},  // 12: Purple stripe
+		{0.9f,  0.15f, 0.0f},  // 13: Orange stripe
+		{0.0f,  0.1f,  0.0f},  // 14: Green stripe
+		{0.3f,  0.05f, 0.05f}  // 15: Brown stripe
+	};
+
+	// Drawing
+	int CircleThickness = 2;
+	std::vector<cv::Vec3b> DrawPalette = {
+		{255, 255, 255}, // White
+		{  0, 255, 255}, // Yellow
+		{255,   0,   0}, // Blue
+		{  0,   0, 255}, // Red
+		{128,   0, 128}, // Purple
+		{  0, 165, 255}, // Orange
+		{  0, 128,   0}, // Green
+		{ 42,  42, 165}, // Brown
+		{  0,   0,   0}, // Black
+		{  0, 255, 255}, // Yellow
+		{255,   0,   0}, // Blue
+		{  0,   0, 255}, // Red
+		{128,   0, 128}, // Purple
+		{  0, 165, 255}, // Orange
+		{  0, 128,   0}, // Green
+		{ 42,  42, 165}, // Brown
+	};
+};
+static Config s_Config;
+
+bool BallIdIsStriped(int id) { return id >= 9; }
+
+void loadImage(Mat* image, const std::string& path)
+{
+	*image = imread(path, -1);
+
+	if (image->empty())
+	{
+		std::cout << "Could not open " << path << std::endl;
+	}
+}
+
+void crop(Mat* src, Mat* dst, cv::Point* srcPoints, cv::Scalar value)
+{
+	cv::Mat mask = cv::Mat::zeros(src->size(), CV_8UC1);
+
+	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
+
+	*dst = src->clone();
+	dst->setTo(value, mask == 0);
+}
 
 std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const cv::Mat& image, double threshold)
 {
@@ -108,22 +223,23 @@ void computeFeltMask(Mat* src, Mat* dst)
 		S = channels[2];
 	}
 
-	cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
+	cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(s_Config.FeltMaskMorphKernel, s_Config.FeltMaskMorphKernel));
 
 	cv::Mat inverseEdges;
 	{
 		Mat col = HLS;
 		//Mat col = H;
 		//Mat col = L;
-		//col.setTo(0, greenMask);
-		cv::GaussianBlur(col, col, cv::Size(7, 7), 1.5);
+		cv::GaussianBlur(col, col, cv::Size(s_Config.FeltMaskGaussianKernel, s_Config.FeltMaskGaussianKernel), s_Config.FeltMaskGaussianStrength);
 
 		cv::Mat edges;
-		cv::Canny(col, edges, 15, 20);
+		cv::Canny(col, edges, s_Config.CannyWeakThreshold, s_Config.CannyStrongThreshold);
 
-		cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
-		cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
-		cv::morphologyEx(edges, edges, cv::MORPH_ERODE, kernel);
+		for (int i = 0; i < s_Config.CannyNumDilations; i++)
+			cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
+
+		for (int i = 0; i < s_Config.CannyNumErosions; i++)
+			cv::morphologyEx(edges, edges, cv::MORPH_ERODE, kernel);
 
 		cv::bitwise_not(edges, inverseEdges);
 
@@ -141,11 +257,8 @@ void computeFeltMask(Mat* src, Mat* dst)
 
 		cv::Point seed(600, 400); // TODO: Find stochastically
 
-		float hTol = 5;
-		float lTol = 25;
-		float vTol = 25;
-		cv::Scalar loDiff(hTol, lTol, vTol);
-		cv::Scalar upDiff(hTol, lTol, vTol);
+		cv::Scalar loDiff(s_Config.FloodFillToleranceHue, s_Config.FloodFillToleranceLightness, s_Config.FloodFillToleranceValue);
+		cv::Scalar upDiff(s_Config.FloodFillToleranceHue, s_Config.FloodFillToleranceLightness, s_Config.FloodFillToleranceValue);
 
 		cv::floodFill(
 			hsv,
@@ -189,9 +302,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 		gray = L;
 
-		const int kernelSize = 7;
-		const double strength = 1.2;
-		cv::GaussianBlur(gray, gray, cv::Size(kernelSize, kernelSize), strength);
+		cv::GaussianBlur(gray, gray, cv::Size(s_Config.HoughGaussianKernel, s_Config.HoughGaussianKernel), s_Config.HoughGaussianStrength);
 		gray.setTo(0, *feltMask);
 	}
 
@@ -199,25 +310,18 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 
 	std::vector<BallCandidate> candidates;
 	{
-		const double inverseAccumReso = 1.2;
-		const double minCenterDistance = 10.0;
-		const double upperCannyThreshold = 60;
-		const double accumThreshold = 12.0;
-		const int minRadius = 23;
-		const int maxRadius = 26;
-
 		std::vector<cv::Vec3f> circles;
 
 		cv::HoughCircles(
 			gray,
 			circles,
 			cv::HOUGH_GRADIENT,
-			inverseAccumReso,
-			minCenterDistance,
-			upperCannyThreshold,
-			accumThreshold,
-			minRadius,
-			maxRadius
+			s_Config.HoughInverseAccumReso,
+			s_Config.HoughMinCenterDistance,
+			s_Config.HoughUpperCannyThreshold,
+			s_Config.HoughAccumThreshold,
+			s_Config.HoughMinRadius,
+			s_Config.HoughMaxRadius
 		);
 
 		for (int i = 0; i < circles.size(); i++)
@@ -282,47 +386,7 @@ std::vector<BallCandidate> combineCircles(
 	return result;
 }
 
-// For Debugging
-void drawHollowCircles(
-	Mat* image,
-	const std::vector<BallCandidate>& circles,
-	const cv::Scalar& color = cv::Scalar(0, 0, 255),
-	int thickness = 2)
-{
-	for (const auto& circle : circles)
-	{
-		cv::circle(*image, circle.Center, circle.Radius, color, thickness);
-	}
-}
-
-enum BallID : uint32_t
-{
-	eWhite = 0,
-	eYellowSolid = 1,
-	eBlueSolid = 2,
-	eRedSolid = 3,
-	ePurpleSolid = 4,
-	eOrangeSolid = 5,
-	eGreenSolid = 6,
-	eBrownSolid = 7,
-	eBlack = 8,
-	eYellowStriped = 9,
-	eBlueStriped = 10,
-	eRedStriped = 11,
-	ePurpleStriped = 12,
-	eOrangeStriped = 13,
-	eGreenStriped = 14,
-	eBrownStriped = 15,
-	eCount = 16
-};
-
-struct AssignedCandidate
-{
-	BallCandidate Candidate;
-	BallID ID;
-};
-
-float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = 15.0f)
+float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = s_Config.LabGaussianStdDev)
 {
 	cv::Vec3f d = observedLab - expectedLab;
 	float dist = std::sqrt(d.dot(d));
@@ -335,7 +399,7 @@ float averageColorWeight(
 	const cv::Mat& feltMask,
 	const BallCandidate& candidate,
 	const cv::Vec3f& expectedLab,
-	float sigma = 15.0f)
+	float sigma = s_Config.LabGaussianStdDev)
 {
 	cv::Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
 	int radius = cvRound(candidate.Radius);
@@ -418,7 +482,6 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 	if (M < N)
 		throw std::invalid_argument("Hungarian algorithm requires columns >= rows");
 
-	// 1-indexed implementation.
 	std::vector<double> u(N + 1), v(M + 1);
 	std::vector<int> p(M + 1), way(M + 1);
 
@@ -499,31 +562,10 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 {
 	std::vector<cv::Vec3f> paletteLab;
 	{
-		cv::Vec3f paletteF[] = {
-			{0.9f,  0.8f,  0.5f},  // 00: White
-			{0.9f,  0.5f,  0.0f},  // 01: Yellow
-			{0.0f,  0.0f,  0.3f},  // 02: Blue
-			{0.9f,  0.0f,  0.0f},  // 03: Red
-			{0.05f, 0.0f,  0.1f},  // 04: Purple
-			{0.9f,  0.15f, 0.0f},  // 05: Orange
-			{0.0f,  0.1f,  0.0f},  // 06: Green
-			{0.3f,  0.05f, 0.05f}, // 07: Brown
-			{0.0f,  0.0f,  0.0f},  // 08: Black
-			{0.9f,  0.5f,  0.0f},  // 09: Yellow stripe
-			{0.0f,  0.0f,  0.3f},  // 10: Blue stripe
-			{0.9f,  0.0f,  0.0f},  // 11: Red stripe
-			{0.05f, 0.0f,  0.1f},  // 12: Purple stripe
-			{0.9f,  0.15f, 0.0f},  // 13: Orange stripe
-			{0.0f,  0.1f,  0.0f},  // 14: Green stripe
-			{0.3f,  0.05f, 0.05f}  // 15: Brown stripe
-		};
-
-		for (const auto& rgb : paletteF)
+		for (const auto& rgb : s_Config.RecognitionPalette)
 		{
 			cv::Mat pixel(1, 1, CV_8UC3);
-			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(
-				255*rgb[2], 255 * rgb[1], 255 * rgb[0]
-			); // RGB -> BGR
+			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(255*rgb[2], 255 * rgb[1], 255 * rgb[0]); 
 
 			cv::Mat lab;
 			cv::cvtColor(pixel, lab, cv::COLOR_BGR2Lab);
@@ -545,14 +587,10 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 
 	std::vector<std::vector<float>> weightMatrix;
 
-	constexpr float RADIUS_MULTIPLIER = 0.8f;
-	constexpr float STRIPES_WEIGHT_MULTIPLIER = 0.3f;
-	constexpr float MIN_WEIGHT_THRESHOLD = 0.001f;
-
 	for (uint32_t i = 0; i < candidates.size(); i++)
 	{
 		BallCandidate candidate = candidates[i];
-		candidate.Radius *= RADIUS_MULTIPLIER; // Exclude edges
+		candidate.Radius *= s_Config.RecognitionRadiusMult; // Exclude edges
 
 		std::vector<float> weights;
 
@@ -567,10 +605,10 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 				cv::Vec3f white = paletteLab[0];
 				float whiteWeight = averageColorWeight(lab, *feltMask, candidate, white, 15.0f);
 
-				weight = whiteWeight * STRIPES_WEIGHT_MULTIPLIER + weight * (1.0f - STRIPES_WEIGHT_MULTIPLIER);
+				weight = whiteWeight * s_Config.RecognitionStripesWeight + weight * (1.0f - s_Config.RecognitionStripesWeight);
 			}
 
-			if (weight < MIN_WEIGHT_THRESHOLD)
+			if (weight < s_Config.RecognitionMinWeightThreshold)
 				weight = 0.0f;
 
 			weights.emplace_back(weight);
@@ -584,7 +622,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	std::vector<AssignedCandidate> assignedList;
 
 	// Greedy Approach
-	if (false)
+	if (!s_Config.UseHungarianSolver)
 	{
 		auto selectBall = [&](BallID ballId)
 		{
@@ -643,7 +681,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	}
 
 	// Hungarian Approach
-	if (true)
+	if (s_Config.UseHungarianSolver)
 	{
 		// TODO: If this approach is better, cancel out transpose
 		{
@@ -660,9 +698,8 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			weightMatrix = transposed;
 		}
 
+		// Fill Dummies
 		{
-			//std::vector<float> dummyWeights(candidates.size(), 0.0f);
-
 			for (uint32_t i = 0; i < BallID::eCount; i++)
 			{
 				for (uint32_t j = candidates.size(); j < BallID::eCount; j++)
@@ -687,54 +724,36 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	return assignedList;
 }
 
+void drawHollowCircles(
+	Mat* image,
+	const std::vector<BallCandidate>& circles,
+	const cv::Scalar& color = cv::Scalar(0, 0, 255),
+	int thickness = s_Config.CircleThickness)
+{
+	for (const auto& circle : circles)
+	{
+		cv::circle(*image, circle.Center, circle.Radius, color, thickness);
+	}
+}
+
 void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assignedList)
 {
-	cv::Vec3b bgrPalette[] = {
-		{255, 255, 255}, // White
-		{  0, 255, 255}, // Yellow
-		{255,   0,   0}, // Blue
-		{  0,   0, 255}, // Red
-		{128,   0, 128}, // Purple
-		{  0, 165, 255}, // Orange
-		{  0, 128,   0}, // Green
-		{ 42,  42, 165}, // Brown
-		{  0,   0,   0}, // Black
-		{  0, 255, 255}, // Yellow
-		{255,   0,   0}, // Blue
-		{  0,   0, 255}, // Red
-		{128,   0, 128}, // Purple
-		{  0, 165, 255}, // Orange
-		{  0, 128,   0}, // Green
-		{ 42,  42, 165}, // Brown
-	};
-
 	for (uint32_t i = 0; i < assignedList.size(); i++)
 	{ 
 		BallCandidate circle = assignedList[i].Candidate;
-		cv::Vec3b color = bgrPalette[assignedList[i].ID];
-		cv::circle(*image, circle.Center, circle.Radius, color, 2);
+		cv::Vec3b color = s_Config.DrawPalette[assignedList[i].ID];
+		cv::circle(*image, circle.Center, circle.Radius, color, s_Config.CircleThickness);
 
-		if (assignedList[i].ID >= 9)
+		if (BallIdIsStriped(assignedList[i].ID))
 		{
-			cv::circle(*image, circle.Center, circle.Radius, cv::Scalar(255,255,255), 1);
+			cv::circle(*image, circle.Center, circle.Radius, cv::Scalar(255,255,255), s_Config.CircleThickness-1);
 		}
 	}
 }
 
 void MyApplication()
 {
-	const char* folderPath = "Media/Pool/";
-	const char* fileNames[] = {
-		"AllBalls.jpeg",
-		"Table1.jpeg",
-		"Table2.jpeg",
-		"Table3.jpeg",
-		"Table4.jpeg",
-		"Table5.jpeg",
-		"Table6.jpeg"
-	};
-
-	int imageCount = sizeof(fileNames) / sizeof(fileNames[0]);
+	int imageCount = sizeof(s_Config.FileNameList) / sizeof(s_Config.FileNameList[0]);
 	Mat* inputImages = new Mat[imageCount];
 	Mat* outputImages = new Mat[imageCount];
 
@@ -743,31 +762,23 @@ void MyApplication()
 		Mat* in = &inputImages[i];
 		Mat* out = &outputImages[i];
 
-		std::string filePath = std::string(folderPath) + fileNames[i];
+		std::string filePath = std::string(s_Config.FolderPath) + s_Config.FileNameList[i];
 		loadImage(in, filePath);
-
-		// NW, NE, SE, SW
-		cv::Point srcPoints[4] = {
-			{337,  35},
-			{1570, 21},
-			{1888, 451},
-			{38, 472},
-		};
 
 		size_t width = in->cols;
 		size_t height = in->rows;
 
-		crop(in, out, srcPoints, cv::Scalar(0,0,0));
+		crop(in, out, s_Config.TablePoints, cv::Scalar(0,0,0));
 
 		cv::Mat feltMask;
 		computeFeltMask(out, &feltMask);
-		crop(&feltMask, &feltMask, srcPoints, cv::Scalar(1,1,1));
+		crop(&feltMask, &feltMask, s_Config.TablePoints, cv::Scalar(1,1,1));
 
 		std::vector<BallCandidate> circlesH = detectBallsHough(out, &feltMask);
 
 		std::vector<BallCandidate> candidates;
 		candidates.insert(candidates.end(), circlesH.begin(), circlesH.end());
-		std::vector<BallCandidate> combined = combineCircles(candidates, 21.0f, 8.0f);
+		std::vector<BallCandidate> combined = combineCircles(candidates, s_Config.CandidateCombineDistanceThreshold, s_Config.CandidateCombineRadiusThreshold);
 
 		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined, &feltMask);
 
@@ -785,7 +796,6 @@ void MyApplication()
 
 		char pause = cv::waitKey();  // This introduces a delay between frame.  The length of the delay/number can be reduced.
 	}
-
 }
 
 /*
