@@ -415,7 +415,7 @@ void printWeightMatrix(const std::vector<std::vector<float>>& weightMatrix)
 	}
 }
 
-std::vector<AssignedCandidate> buildWeightMatrix(Mat* image, const std::vector<BallCandidate>& candidates)
+std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCandidate>& candidates)
 {
 	std::vector<cv::Vec3f> paletteLab;
 	{
@@ -429,7 +429,14 @@ std::vector<AssignedCandidate> buildWeightMatrix(Mat* image, const std::vector<B
 			{255, 165,   0}, // Orange
 			{  0, 128,   0}, // Green
 			{165,  42,  42}, // Brown
-			{  0,   0,   0}  // Black
+			{  0,   0,   0}, // Black
+			{255, 255,   0}, // Yellow
+			{  0,   0, 255}, // Blue 
+			{255,   0,   0}, // Red
+			{128,   0, 128}, // Purple
+			{255, 165,   0}, // Orange
+			{  0, 128,   0}, // Green
+			{165,  42,  42}, // Brown
 		};
 
 		for (const auto& rgb : rgbPalette)
@@ -473,8 +480,7 @@ std::vector<AssignedCandidate> buildWeightMatrix(Mat* image, const std::vector<B
 
 		for (uint32_t j = 0; j < NUM_BALLS; j++)
 		{
-			uint32_t colorIdx = j % 8;
-			cv::Vec3f expectedLab = paletteLab[colorIdx];
+			cv::Vec3f expectedLab = paletteLab[j];
 			
 			float weight = averageColorWeight(lab, candidate, expectedLab, 15.0f);
 
@@ -486,7 +492,98 @@ std::vector<AssignedCandidate> buildWeightMatrix(Mat* image, const std::vector<B
 
 	printWeightMatrix(weightMatrix);
 
-	return {};
+	std::vector<AssignedCandidate> assignedList;
+
+	auto selectBall = [&](BallID ballId)
+		{
+			float maxWeight = -1.0f;
+			int maxIdx = -1;
+			for (uint32_t i = 0; i < candidates.size(); i++)
+			{
+				std::vector<float>& weights = weightMatrix[i];
+				float weight = weights[ballId];
+
+				if (weight > maxWeight)
+				{
+					maxWeight = weight;
+					maxIdx = i;
+				}
+			}
+
+			if (maxIdx != -1)
+			{
+				AssignedCandidate assigned;
+				assigned.Candidate = candidates[maxIdx];
+				assigned.ID = ballId;
+				assignedList.emplace_back(assigned);
+			}
+
+			for (uint32_t i = 0; i < candidates.size(); i++)
+			{
+				for (uint32_t j = 0; j < NUM_BALLS; j++)
+				{
+					if (i != maxIdx && j != ballId)
+						continue;
+
+					weightMatrix[i][j] = 0.0f;
+				}
+			}
+		};
+
+	selectBall(BallID::eYellowSolid);
+	selectBall(BallID::eOrangeSolid);
+	selectBall(BallID::eRedSolid);
+	selectBall(BallID::eBrownSolid);
+	selectBall(BallID::ePurpleSolid);
+	selectBall(BallID::eBlueSolid);
+	selectBall(BallID::eGreenSolid);
+
+	selectBall(BallID::eWhite);
+	selectBall(BallID::eBlack);
+
+	//selectBall(BallID::eYellowStriped);
+	//selectBall(BallID::eOrangeStriped);
+	//selectBall(BallID::eRedStriped);
+	//selectBall(BallID::eBrownStriped);
+	//selectBall(BallID::ePurpleStriped);
+	//selectBall(BallID::eBlueStriped);
+	//selectBall(BallID::eGreenStriped);
+
+	return assignedList;
+}
+
+void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assignedList)
+{
+	cv::Vec3b bgrPalette[] = {
+		{255, 255, 255}, // White
+		{  0, 255, 255}, // Yellow
+		{255,   0,   0}, // Blue
+		{  0,   0, 255}, // Red
+		{128,   0, 128}, // Purple
+		{  0, 165, 255}, // Orange
+		{  0, 128,   0}, // Green
+		{ 42,  42, 165}, // Brown
+		{  0,   0,   0}, // Black
+		{  0, 255, 255}, // Yellow
+		{255,   0,   0}, // Blue
+		{  0,   0, 255}, // Red
+		{128,   0, 128}, // Purple
+		{  0, 165, 255}, // Orange
+		{  0, 128,   0}, // Green
+		{ 42,  42, 165}, // Brown
+	};
+
+	for (uint32_t i = 0; i < assignedList.size(); i++)
+	{ 
+		BallCandidate circle = assignedList[i].Candidate;
+		cv::Vec3b color = bgrPalette[assignedList[i].ID];
+		cv::circle(*image, circle.Center, circle.Radius, color, 2);
+
+		if (assignedList[i].ID >= 9)
+		{
+			cv::circle(*image, circle.Center, circle.Radius, cv::Scalar(255,255,255), 1);
+		}
+	}
 }
 
 void MyApplication()
@@ -531,15 +628,14 @@ void MyApplication()
 
 		std::vector<BallCandidate> candidates;
 		candidates.insert(candidates.end(), circlesH.begin(), circlesH.end());
-
 		std::vector<BallCandidate> combined = combineCircles(candidates, 21.0f, 8.0f);
 
-		buildWeightMatrix(out, combined);
+		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined);
 
-		drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
-		drawHollowCircles(out, combined, cv::Scalar(255, 255, 255));
+		//drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
+		//drawHollowCircles(out, combined, cv::Scalar(255, 255, 255));
 
-		//nearestNeighbourQuantize(out, out);
+		drawAssignedColors(out, assignedList);
 		
 		imshow(fileNames[i], *out);
 
