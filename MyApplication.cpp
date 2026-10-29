@@ -51,6 +51,48 @@ struct BallCandidate
 	CandidateSource Source;  
 };
 
+std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const cv::Mat& image, double threshold)
+{
+	std::vector<BallCandidate> filtered;
+
+	cv::Mat circleMask = cv::Mat::zeros(image.size(), CV_8UC1);
+
+	for (const auto& candidate : candidates)
+	{
+		circleMask.setTo(0);
+
+		cv::Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
+
+		float radius = cvRound(candidate.Radius);
+
+		if (radius <= 0.0f)
+			continue;
+
+		cv::circle(
+			circleMask,
+			center,
+			radius,
+			cv::Scalar(255),
+			cv::FILLED
+		);
+
+		double totalPixels = cv::countNonZero(circleMask);
+
+		if (totalPixels == 0)
+			continue;
+
+		cv::Mat intersection;
+		cv::bitwise_and(image, circleMask, intersection);
+
+		double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
+
+		if (ratio >= threshold)
+			filtered.push_back(candidate);
+	}
+
+	return filtered;
+}
+
 std::vector<BallCandidate> detectBallsHough(Mat* image)
 {
 	cv::Mat H, L, S;
@@ -114,8 +156,11 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 
 		cv::Point seed(600, 400); // TODO: Find stochastically
 
-		cv::Scalar loDiff(5, 25, 25);
-		cv::Scalar upDiff(5, 25, 25);
+		float hTol = 5;
+		float lTol = 25;
+		float vTol = 25;
+		cv::Scalar loDiff(hTol, lTol, vTol);
+		cv::Scalar upDiff(hTol, lTol, vTol);
 
 		cv::floodFill(
 			hsv,
@@ -130,7 +175,8 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 
 		greenMask = floodMask(cv::Rect(1, 1, hsv.cols, hsv.rows)).clone();
 
-		cv::morphologyEx(greenMask, greenMask, cv::MORPH_OPEN, kernel);
+		//cv::morphologyEx(greenMask, greenMask, cv::MORPH_OPEN, kernel);
+		cv::morphologyEx(greenMask, greenMask, cv::MORPH_CLOSE, kernel);
 
 		//imshow(".", greenMask);
 	}
@@ -180,6 +226,8 @@ std::vector<BallCandidate> detectBallsHough(Mat* image)
 			candidates.emplace_back(candidate);
 		}
 	}
+
+	candidates = filterCandidates(candidates, gray, 0.6f);
 
 	return candidates;
 }
@@ -563,7 +611,9 @@ void MyApplication()
 		std::vector<BallCandidate> circlesH = detectBallsHough(out);
 		std::vector<BallCandidate> circlesC = detectBallsContours(out);
 		std::vector<BallCandidate> circlesWS = detectBallsWatershed(out);
+
 		std::vector<BallCandidate> circles = combineCircles(circlesH, circlesWS, 20.0f, 8.0f);
+
 		drawHollowCircles(out, circlesH, cv::Scalar(0, 0, 255));
 		//drawHollowCircles(out, circlesC, cv::Scalar(0, 255, 255));
 		//drawHollowCircles(out, circlesWS, cv::Scalar(255, 0, 0));
