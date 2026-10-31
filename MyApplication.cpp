@@ -84,7 +84,7 @@ struct Config
 	float FeltMaskGaussianStrength = 1.2f;
 
 	// Canny
-	int CannyWeakThreshold = 15;
+	int CannyWeakThreshold = 20;
 	int CannyStrongThreshold = 30;
 	int CannyNumDilations = 4;
 	int CannyNumErosions = 1;
