@@ -112,28 +112,23 @@ struct Config
 	float OverlapRejectionThreshold = 1.0f;
 
 	// Recognition
-	float LabGaussianStdDev = 10.0f;
-	float RecognitionRadiusMult = 0.8f;
-	float RecognitionStripesWeight = 0.3f;
+	float LabGaussianStdDev = 9.0f;
+	float LabDistanceWeightLightness = 0.5f;
+	float LabDistanceWeightRedGreen = 1.0f;
+	float LabDistanceWeightBlueYellow = 1.0f;
+	float RecognitionRadiusMult = 0.9f;
 	float RecognitionMinWeightThreshold = 0.01f;
 	bool UseHungarianSolver = true;
 	std::vector<cv::Vec3f> RecognitionPalette = {
 		{0.9f,  0.8f,  0.5f},  // 00: White
-		{0.9f,  0.5f,  0.0f},  // 01: Yellow
-		{0.0f,  0.0f,  0.3f},  // 02: Blue
+		{0.98f, 0.76f,  0.0f},  // 01: Yellow
+		{0.17f, 0.2f, 0.49f},  // 02: Blue
 		{0.9f,  0.0f,  0.0f},  // 03: Red
-		{0.05f, 0.0f,  0.1f},  // 04: Purple
-		{0.9f,  0.15f, 0.0f},  // 05: Orange
+		{0.23f, 0.15f, 0.35f},  // 04: Purple
+		{0.96f, 0.44f, 0.22f},  // 05: Orange
 		{0.0f,  0.1f,  0.0f},  // 06: Green
 		{0.3f,  0.05f, 0.05f}, // 07: Brown
-		{0.0f,  0.0f,  0.0f},  // 08: Black
-		{0.9f,  0.5f,  0.0f},  // 09: Yellow stripe
-		{0.0f,  0.0f,  0.3f},  // 10: Blue stripe
-		{0.9f,  0.0f,  0.0f},  // 11: Red stripe
-		{0.05f, 0.0f,  0.1f},  // 12: Purple stripe
-		{0.9f,  0.15f, 0.0f},  // 13: Orange stripe
-		{0.0f,  0.1f,  0.0f},  // 14: Green stripe
-		{0.3f,  0.05f, 0.05f}  // 15: Brown stripe
+		{0.01f,  0.02f,  0.01f},  // 08: Black
 	};
 
 	// Drawing
@@ -545,6 +540,11 @@ std::vector<BallCandidate> combineCircles(
 float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = s_Config.LabGaussianStdDev)
 {
 	cv::Vec3f d = observedLab - expectedLab;
+
+	d[0] *= s_Config.LabDistanceWeightLightness;
+	d[1] *= s_Config.LabDistanceWeightRedGreen;
+	d[2] *= s_Config.LabDistanceWeightBlueYellow;
+
 	float dist = std::sqrt(d.dot(d));
 
 	return std::exp(-(dist * dist) / (2.0f * sigma * sigma)); // Gaussian
@@ -757,6 +757,9 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			cv::circle(discardMask, candidates[other].Center, candidates[other].Radius, 255, cv::FILLED);
 		}
 
+		float WhiteBlackContribWeight = 2.0f;
+		float WhiteBlackSpecularWeight = 0.1f;
+
 		float SolidMainContribWeight = 1.0f;
 		float SolidWhiteWeight = -0.1f;
 		float SolidSpecularWeight = 0.1f;
@@ -769,7 +772,9 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 
 		for (uint32_t j = 0; j < BallID::eCount; j++)
 		{
-			cv::Vec3f expectedLab = paletteLab[j];
+			uint paletteIdx = BallIdIsStriped(j) ? j - 8 : j;
+
+			cv::Vec3f expectedLab = paletteLab[paletteIdx];
 			cv::Vec3f whiteLab = paletteLab[BallID::eWhite];
 			cv::Vec3f specularWhiteLab = cv::Vec3f(100.0f, 0.0f, 0.0f);
 
@@ -777,12 +782,14 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			float whiteContrib = averageColorWeight(lab, discardMask, candidate, whiteLab);
 			float specularContrib = averageColorWeight(lab, discardMask, candidate, specularWhiteLab);
 
+			// TODO: Multiply weight by radius? 
+
 			float weight = 0.0f;
 
 			if (j == BallID::eWhite || j == BallID::eBlack)
 			{
-				weight += contrib * SolidMainContribWeight;
-				weight += specularContrib * SolidSpecularWeight;
+				weight += contrib * WhiteBlackContribWeight;
+				weight += specularContrib * WhiteBlackSpecularWeight;
 			}
 			else if (BallIdIsStriped(j)) 
 			{
