@@ -85,7 +85,7 @@ struct Config
 
 	// Canny
 	int CannyWeakThreshold = 17;
-	int CannyStrongThreshold = 35;
+	int CannyStrongThreshold = 40;
 	int CannyNumDilations = 5;
 	int CannyNumErosions = 2;
 
@@ -112,10 +112,10 @@ struct Config
 	float OverlapRejectionThreshold = 1.0f;
 
 	// Recognition
-	float LabGaussianStdDev = 1.5f;
+	float LabGaussianStdDev = 10.0f;
 	float RecognitionRadiusMult = 0.8f;
 	float RecognitionStripesWeight = 0.3f;
-	float RecognitionMinWeightThreshold = 0.001f;
+	float RecognitionMinWeightThreshold = 0.01f;
 	bool UseHungarianSolver = true;
 	std::vector<cv::Vec3f> RecognitionPalette = {
 		{0.9f,  0.8f,  0.5f},  // 00: White
@@ -757,20 +757,44 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			cv::circle(discardMask, candidates[other].Center, candidates[other].Radius, 255, cv::FILLED);
 		}
 
+		float SolidMainContribWeight = 1.0f;
+		float SolidWhiteWeight = -0.1f;
+		float SolidSpecularWeight = 0.1f;
+
+		float StripesMainContribWeight = 0.6f;
+		float StripesWhiteWeight = 0.35f;
+		float StripesSpecularWeight = 0.05f;
+
 		std::vector<float> weights;
 
 		for (uint32_t j = 0; j < BallID::eCount; j++)
 		{
 			cv::Vec3f expectedLab = paletteLab[j];
-			
-			float weight = averageColorWeight(lab, discardMask, candidate, expectedLab, 15.0f);
+			cv::Vec3f whiteLab = paletteLab[BallID::eWhite];
+			cv::Vec3f specularWhiteLab = cv::Vec3f(100.0f, 0.0f, 0.0f);
 
-			if (BallIdIsStriped(j)) // TODO: Make solids have reduced weight from whites
+			float contrib = averageColorWeight(lab, discardMask, candidate, expectedLab);
+			float whiteContrib = averageColorWeight(lab, discardMask, candidate, whiteLab);
+			float specularContrib = averageColorWeight(lab, discardMask, candidate, specularWhiteLab);
+
+			float weight = 0.0f;
+
+			if (j == BallID::eWhite || j == BallID::eBlack)
 			{
-				cv::Vec3f white = paletteLab[0];
-				float whiteWeight = averageColorWeight(lab, discardMask, candidate, white, 15.0f);
-
-				weight = whiteWeight * s_Config.RecognitionStripesWeight + weight * (1.0f - s_Config.RecognitionStripesWeight);
+				weight += contrib * SolidMainContribWeight;
+				weight += specularContrib * SolidSpecularWeight;
+			}
+			else if (BallIdIsStriped(j)) 
+			{
+				weight += contrib * StripesMainContribWeight;
+				weight += whiteContrib * StripesWhiteWeight;
+				weight += specularContrib * StripesSpecularWeight;
+			}
+			else
+			{
+				weight += contrib * SolidMainContribWeight;
+				weight += whiteContrib * SolidWhiteWeight;
+				weight += specularContrib * SolidSpecularWeight;
 			}
 
 			if (weight < s_Config.RecognitionMinWeightThreshold)
