@@ -65,7 +65,7 @@ struct Config
 	bool RunAllImages = false;
 
 	// Table
-	cv::Point TablePoints[4] = { // NW, NE, SE, SW
+	Point TablePoints[4] = { // NW, NE, SE, SW
 		{337,  35},
 		{1570, 21},
 		{1888, 451},
@@ -106,8 +106,12 @@ struct Config
 
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.9f; 
-	float CandidateFilterRadiusMultiplier = 1.0f;
+	float CandidateFilterPixelCountRadiusMultiplier = 1.0f;
+	float CandidateFilterLaplacianRadiusMultiplier = 0.6f;
 	float CandidateFilterLaplacianThreshold = 10000.0f;
+	//float CandidateFilterLaplacianThreshold = INFINITY;
+	float CandidateFilterEdgeDensityThreshold = 0.175f;
+	//float CandidateFilterEdgeDensityThreshold = INFINITY;
 	float CandidateCombineDistanceThreshold = 15.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
@@ -180,9 +184,9 @@ void loadImage(Mat* image, const std::string& path)
 	}
 }
 
-void crop(Mat* src, Mat* dst, cv::Point* srcPoints, cv::Scalar value)
+void crop(Mat* src, Mat* dst, Point* srcPoints, cv::Scalar value)
 {
-	cv::Mat mask = cv::Mat::zeros(src->size(), CV_8UC1);
+	Mat mask = Mat::zeros(src->size(), CV_8UC1);
 
 	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
 
@@ -200,7 +204,7 @@ void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t wid
 		{0.0f,           height - 1.0f}
 	};
 
-	cv::Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
+	Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
 
 	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
 }
@@ -215,7 +219,7 @@ cv::Point2f perspectiveTransform(cv::Point2f point, cv::Point2f* srcPoints, size
 		{0.0f,           height - 1.0f}
 	};
 
-	cv::Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
+	Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
 
 	std::vector<cv::Point2f> pointVec = { point };
 	std::vector<cv::Point2f> dst;
@@ -235,9 +239,9 @@ cv::Point2f transformToEvalTable(cv::Point2f point, cv::Point2f* srcPoints, size
 	return point;
 }
 
-double getLaplacianScore(const cv::Mat& image, const Mat& circleMask, const cv::Point& center, int radius)
+double getLaplacianScore(const Mat& image, const Mat& circleMask)
 {
-	cv::Mat gray, laplacian;
+	Mat gray, laplacian;
 
 	cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
 
@@ -249,11 +253,25 @@ double getLaplacianScore(const cv::Mat& image, const Mat& circleMask, const cv::
 	return stddev[0] * stddev[0];
 }
 
-std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const cv::Mat& image, double threshold)
+double getEdgeDensityScore(const Mat& image, const Mat& circleMask)
+{
+	Mat gray, edges;
+
+	cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+
+	cv::Canny(gray, edges, 50, 150);
+
+	int edgePixels = cv::countNonZero(edges & circleMask);
+	int totalPixels = cv::countNonZero(circleMask);
+
+	return static_cast<double>(edgePixels) / totalPixels;
+}
+
+std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const Mat& image, double threshold)
 {
 	std::vector<BallCandidate> filtered;
 
-	cv::Mat nonZeroMask;
+	Mat nonZeroMask;
 	if (image.channels() == 3)
 		cv::cvtColor(image, nonZeroMask, cv::COLOR_BGR2GRAY);
 	else
@@ -261,13 +279,11 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 
 	cv::threshold(nonZeroMask, nonZeroMask, 0, 255, cv::THRESH_BINARY);
 
-	cv::Mat circleMask = cv::Mat::zeros(image.size(), CV_8UC1);
+	Mat circleMask = Mat::zeros(image.size(), CV_8UC1);
 
 	for (const auto& candidate : candidates)
 	{
-		circleMask.setTo(0);
-
-		cv::Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
+		Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
 
 		// If circle within bounds, allow OOB pixels to be counted
 		Mat includeMask = nonZeroMask.clone();
@@ -279,37 +295,55 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 			crop(&includeMask, &includeMask, s_Config.TablePoints, 255);
 		}
 
-		float radius = cvRound(candidate.Radius) * s_Config.CandidateFilterRadiusMultiplier;
-
+		float radius = cvRound(candidate.Radius);
 		if (radius <= 0.0f)
 			continue;
 
-		cv::circle(
-			circleMask,
-			center,
-			radius,
-			cv::Scalar(255),
-			cv::FILLED
-		);
+		// Laplacian / edge density checks for net samples
+		{
+			float radiusMod = radius * s_Config.CandidateFilterLaplacianRadiusMultiplier;
+			circleMask.setTo(0);
+			cv::circle(
+				circleMask,
+				center,
+				radiusMod,
+				cv::Scalar(255),
+				cv::FILLED
+			);
 
-		float laplacianScore = getLaplacianScore(image, circleMask, center, radius);
+			float laplacianScore = getLaplacianScore(image, circleMask);
+			float edgeDensityScore = getEdgeDensityScore(image, circleMask);
 
-		bool isOverNet = laplacianScore >= s_Config.CandidateFilterLaplacianThreshold;
-		if (isOverNet)
-			continue;
+			bool isOverNet = laplacianScore >= s_Config.CandidateFilterLaplacianThreshold || edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;
+			if (isOverNet)
+				continue;
+		}
 
-		double totalPixels = cv::countNonZero(circleMask);
+		// Pixel count checks for felt samples
+		{
+			float radiusMod = radius * s_Config.CandidateFilterPixelCountRadiusMultiplier;
+			circleMask.setTo(0);
+			cv::circle(
+				circleMask,
+				center,
+				radiusMod,
+				cv::Scalar(255),
+				cv::FILLED
+			);
 
-		if (totalPixels == 0)
-			continue;
+			double totalPixels = cv::countNonZero(circleMask);
+			if (totalPixels == 0)
+				continue;
 
-		cv::Mat intersection;
-		cv::bitwise_and(includeMask, circleMask, intersection);
+			Mat intersection;
+			cv::bitwise_and(includeMask, circleMask, intersection);
 
-		double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
+			double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
+			if (ratio < threshold)
+				continue;
+		}
 
-		if (ratio >= threshold)
-			filtered.push_back(candidate);
+		filtered.push_back(candidate);
 	}
 
 	return filtered;
@@ -317,11 +351,11 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 
 void computeFeltMask(Mat* src, Mat* dst)
 {
-	cv::Mat HLS, H, L, S;
+	Mat HLS, H, L, S;
 	{
 		cv::cvtColor(*src, HLS, cv::COLOR_BGR2HLS);
 
-		std::vector<cv::Mat> channels;
+		std::vector<Mat> channels;
 		cv::split(HLS, channels);
 
 		H = channels[0];
@@ -329,16 +363,16 @@ void computeFeltMask(Mat* src, Mat* dst)
 		S = channels[2];
 	}
 
-	cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(s_Config.FeltMaskMorphKernel, s_Config.FeltMaskMorphKernel));
+	Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(s_Config.FeltMaskMorphKernel, s_Config.FeltMaskMorphKernel));
 
-	cv::Mat inverseEdges;
+	Mat inverseEdges;
 	{
 		Mat col = HLS;
 		//Mat col = H;
 		//Mat col = L;
 		cv::GaussianBlur(col, col, cv::Size(s_Config.FeltMaskGaussianKernel, s_Config.FeltMaskGaussianKernel), s_Config.FeltMaskGaussianStrength);
 
-		cv::Mat edges;
+		Mat edges;
 		cv::Canny(col, edges, s_Config.CannyWeakThreshold, s_Config.CannyStrongThreshold);
 
 		imshow("Edges", edges);
@@ -352,16 +386,16 @@ void computeFeltMask(Mat* src, Mat* dst)
 		cv::bitwise_not(edges, inverseEdges);
 	}
 
-	cv::Mat feltMask;
+	Mat feltMask;
 	{
-		cv::Mat hsv;
+		Mat hsv;
 		cv::cvtColor(*src, hsv, cv::COLOR_BGR2HSV);
 
 		hsv.setTo(cv::Scalar(0, 0, 0), inverseEdges == 0);
 
-		cv::Mat floodMask = cv::Mat::zeros(hsv.rows + 2, hsv.cols + 2, CV_8UC1);
+		Mat floodMask = Mat::zeros(hsv.rows + 2, hsv.cols + 2, CV_8UC1);
 
-		cv::Point seed(600, 400); // TODO: Find stochastically
+		Point seed(600, 400); // TODO: Find stochastically
 
 		cv::Scalar loDiff(s_Config.FloodFillToleranceHue, s_Config.FloodFillToleranceLightness, s_Config.FloodFillToleranceValue);
 		cv::Scalar upDiff(s_Config.FloodFillToleranceHue, s_Config.FloodFillToleranceLightness, s_Config.FloodFillToleranceValue);
@@ -390,12 +424,12 @@ void computeFeltMask(Mat* src, Mat* dst)
 
 std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 {
-	cv::Mat H, L, S;
+	Mat H, L, S;
 	{
-		cv::Mat hls;
+		Mat hls;
 		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
 
-		std::vector<cv::Mat> channels;
+		std::vector<Mat> channels;
 		cv::split(hls, channels);
 
 		H = channels[0];
@@ -403,7 +437,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 		S = channels[2];
 	}
 
-	cv::Mat gray;
+	Mat gray;
 	{
 		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 		gray = L;
@@ -433,7 +467,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 		for (int i = 0; i < circles.size(); i++)
 		{
 			BallCandidate candidate;
-			candidate.Center = cv::Point(circles[i][0], circles[i][1]);
+			candidate.Center = Point(circles[i][0], circles[i][1]);
 			candidate.Radius = circles[i][2];
 			candidate.Source = eHough;
 			candidates.emplace_back(candidate);
@@ -499,13 +533,13 @@ float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, fl
 }
 
 float averageColorWeight(
-	const cv::Mat& labImage,
-	const cv::Mat& discardMask,
+	const Mat& labImage,
+	const Mat& discardMask,
 	const BallCandidate& candidate,
 	const cv::Vec3f& expectedLab,
 	float sigma = s_Config.LabGaussianStdDev)
 {
-	cv::Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
+	Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
 	int radius = cvRound(candidate.Radius);
 
 	cv::Rect bounds(0, 0, labImage.cols, labImage.rows);
@@ -519,8 +553,8 @@ float averageColorWeight(
 	if (roi.empty())
 		return 0.0f;
 
-	cv::Mat circleMask = cv::Mat::zeros(roi.size(), CV_8UC1);
-	cv::Point localCenter(center.x - roi.x, center.y - roi.y);
+	Mat circleMask = Mat::zeros(roi.size(), CV_8UC1);
+	Point localCenter(center.x - roi.x, center.y - roi.y);
 	cv::circle(circleMask, localCenter, radius, cv::Scalar(255), cv::FILLED);
 
 	double totalWeight = 0.0;
@@ -668,10 +702,10 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	{
 		for (const auto& rgb : s_Config.RecognitionPalette)
 		{
-			cv::Mat pixel(1, 1, CV_8UC3);
+			Mat pixel(1, 1, CV_8UC3);
 			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(255 * rgb[2], 255 * rgb[1], 255 * rgb[0]); 
 
-			cv::Mat lab;
+			Mat lab;
 			cv::cvtColor(pixel, lab, cv::COLOR_BGR2Lab);
 
 			cv::Vec3b p = lab.at<cv::Vec3b>(0, 0);
@@ -684,7 +718,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 		}
 	}
 
-	cv::Mat lab;
+	Mat lab;
 	cv::cvtColor(*image, lab, cv::COLOR_BGR2Lab);
 
 	std::vector<std::vector<float>> weightMatrix;
@@ -1091,7 +1125,7 @@ void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
 
 		int imageCoordX = evalPos.Column;
 		int imageCoordY = evalPos.Row;
-		cv::Point p(imageCoordX, imageCoordY);
+		Point p(imageCoordX, imageCoordY);
 
 		cv::Vec3b color = s_Config.DrawPalette[i];
 		cv::circle(*image, p, s_Config.EvalCircleDrawRadius, color, s_Config.CircleThickness);
@@ -1124,7 +1158,7 @@ void MyApplication()
 
 		crop(in, out, s_Config.TablePoints, cv::Scalar(0,0,0));
 
-		cv::Mat feltMask;
+		Mat feltMask;
 		computeFeltMask(out, &feltMask);
 		crop(&feltMask, &feltMask, s_Config.TablePoints, 255);
 
