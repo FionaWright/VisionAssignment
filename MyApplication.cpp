@@ -280,8 +280,6 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 		cv::extractChannel(lum, lum, 2);
 	}
 
-	imshow("lum", lum);
-
 	Mat circleMask = Mat::zeros(image.size(), CV_8UC1);
 
 	for (const auto& candidate : candidates)
@@ -352,6 +350,35 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 	return filtered;
 }
 
+Point findCenterSeed(const Mat& mask)
+{
+	Point center(mask.cols / 2, mask.rows / 2);
+
+	std::vector<Point> points;
+	cv::findNonZero(mask, points);
+
+	if (points.empty())
+		return Point(-1, -1);
+
+	Point closest = points[0];
+	double minDist = DBL_MAX;
+
+	for (const Point& p : points)
+	{
+		double dx = p.x - center.x;
+		double dy = p.y - center.y;
+		double dist = dx * dx + dy * dy;
+
+		if (dist < minDist)
+		{
+			minDist = dist;
+			closest = p;
+		}
+	}
+
+	return closest;
+}
+
 void computeFeltMask(Mat* src, Mat* dst)
 {
 	Mat HLS, H, L, S;
@@ -371,8 +398,6 @@ void computeFeltMask(Mat* src, Mat* dst)
 	Mat inverseEdges;
 	{
 		Mat col = HLS;
-		//Mat col = H;
-		//Mat col = L;
 		cv::GaussianBlur(col, col, cv::Size(s_Config.FeltMaskGaussianKernel, s_Config.FeltMaskGaussianKernel), s_Config.FeltMaskGaussianStrength);
 
 		Mat edges;
@@ -391,20 +416,15 @@ void computeFeltMask(Mat* src, Mat* dst)
 
 	Mat feltMask;
 	{
-		Mat hsv;
-		cv::cvtColor(*src, hsv, cv::COLOR_BGR2HSV);
+		Mat floodMask = Mat::zeros(inverseEdges.rows + 2, inverseEdges.cols + 2, CV_8UC1);
 
-		hsv.setTo(cv::Scalar(0, 0, 0), inverseEdges == 0);
+		Point seed = findCenterSeed(inverseEdges);
 
-		Mat floodMask = Mat::zeros(hsv.rows + 2, hsv.cols + 2, CV_8UC1);
-
-		Point seed(600, 400); // TODO: Find stochastically
-
-		cv::Scalar loDiff(s_Config.FloodFillToleranceHue, s_Config.FloodFillToleranceLightness, s_Config.FloodFillToleranceValue);
-		cv::Scalar upDiff(s_Config.FloodFillToleranceHue, s_Config.FloodFillToleranceLightness, s_Config.FloodFillToleranceValue);
+		cv::Scalar loDiff(1,1,1);
+		cv::Scalar upDiff(1,1,1);
 
 		cv::floodFill(
-			hsv,
+			inverseEdges,
 			floodMask,
 			seed,
 			cv::Scalar(),
@@ -414,7 +434,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 			4 | cv::FLOODFILL_MASK_ONLY | (255 << 8)
 		);
 
-		feltMask = floodMask(cv::Rect(1, 1, hsv.cols, hsv.rows)).clone();
+		feltMask = floodMask(cv::Rect(1, 1, inverseEdges.cols, inverseEdges.rows)).clone();
 
 		//cv::morphologyEx(greenMask, greenMask, cv::MORPH_OPEN, kernel);
 		cv::morphologyEx(feltMask, feltMask, cv::MORPH_CLOSE, kernel);
