@@ -76,12 +76,12 @@ struct Config
 	// Felt Mask
 	int FeltMaskMorphKernel = 3;
 	int FeltMaskGaussianKernel = 7;
-	float FeltMaskGaussianStrength = 1.5f;
+	float FeltMaskGaussianStrength = 1.2f;
 
 	// Canny
 	int CannyWeakThreshold = 15;
-	int CannyStrongThreshold = 20;
-	int CannyNumDilations = 2;
+	int CannyStrongThreshold = 30;
+	int CannyNumDilations = 4;
 	int CannyNumErosions = 1;
 
 	// Flood Fill
@@ -312,7 +312,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 
 		cv::bitwise_not(edges, inverseEdges);
 
-		//imshow(".", edges);
+		imshow("Edges", edges);
 	}
 
 	cv::Mat feltMask;
@@ -345,7 +345,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 		//cv::morphologyEx(greenMask, greenMask, cv::MORPH_OPEN, kernel);
 		cv::morphologyEx(feltMask, feltMask, cv::MORPH_CLOSE, kernel);
 
-		//imshow(".", greenMask);
+		imshow("Feltmask", feltMask);
 	}
 
 	*dst = feltMask;
@@ -375,7 +375,7 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 		gray.setTo(0, *feltMask);
 	}
 
-	imshow(".", gray);
+	imshow("Gray", gray);
 
 	std::vector<BallCandidate> candidates;
 	{
@@ -1145,12 +1145,8 @@ void MyApplication()
 * 
 * TODO:
 * 
-* Reject net samples
 * Figure out how to get the tucked green ball sample
 * Figure out flood fill seed stochastically / chunking / multi-scale?
-* Evaluation metrics per image
-* Color detection
-* Figure out if I'm allowed/required to use the training image for information (Ball colors, table position, nets, etc)
 */
 
 /*
