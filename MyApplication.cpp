@@ -320,6 +320,8 @@ void computeFeltMask(Mat* src, Mat* dst)
 		cv::Mat edges;
 		cv::Canny(col, edges, s_Config.CannyWeakThreshold, s_Config.CannyStrongThreshold);
 
+		imshow("Edges", edges);
+
 		for (int i = 0; i < s_Config.CannyNumDilations; i++)
 			cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
 
@@ -327,8 +329,6 @@ void computeFeltMask(Mat* src, Mat* dst)
 			cv::morphologyEx(edges, edges, cv::MORPH_ERODE, kernel);
 
 		cv::bitwise_not(edges, inverseEdges);
-
-		//imshow("Edges", edges);
 	}
 
 	cv::Mat feltMask;
