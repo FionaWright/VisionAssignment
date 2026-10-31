@@ -107,7 +107,7 @@ struct Config
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.88f; 
 	float CandidateFilterRadiusMultiplier = 1.0f;
-	float CandidateCombineDistanceThreshold = 21.0f;
+	float CandidateCombineDistanceThreshold = 15.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
 
