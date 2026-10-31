@@ -99,7 +99,7 @@ struct Config
 	float HoughGaussianStrength = 1.2f;
 	double HoughInverseAccumReso = 1.2;
 	double HoughMinCenterDistance = 10.0;
-	double HoughUpperCannyThreshold = 100;
+	double HoughUpperCannyThreshold = 95;
 	double HoughAccumThreshold = 9.0;
 	int HoughMinRadius = 23;
 	int HoughMaxRadius = 24;
