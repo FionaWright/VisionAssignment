@@ -97,10 +97,10 @@ struct Config
 	double HoughUpperCannyThreshold = 100;
 	double HoughAccumThreshold = 9.0;
 	int HoughMinRadius = 23;
-	int HoughMaxRadius = 25;
+	int HoughMaxRadius = 24;
 
 	// Candidate Filters
-	float CandidateFilterNonZeroThreshold = 0.9f; 
+	float CandidateFilterNonZeroThreshold = 0.88f; 
 	float CandidateCombineDistanceThreshold = 21.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
@@ -312,7 +312,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 
 		cv::bitwise_not(edges, inverseEdges);
 
-		imshow("Edges", edges);
+		//imshow("Edges", edges);
 	}
 
 	cv::Mat feltMask;
@@ -676,7 +676,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			
 			float weight = averageColorWeight(lab, discardMask, candidate, expectedLab, 15.0f);
 
-			if (BallIdIsStriped(j))
+			if (BallIdIsStriped(j)) // TODO: Make solids have reduced weight from whites
 			{
 				cv::Vec3f white = paletteLab[0];
 				float whiteWeight = averageColorWeight(lab, discardMask, candidate, white, 15.0f);
@@ -1091,7 +1091,13 @@ void MyApplication()
 		computeFeltMask(out, &feltMask);
 		crop(&feltMask, &feltMask, s_Config.TablePoints, 255);
 
+		Mat display;
+
 		std::vector<BallCandidate> circlesH = detectBallsHough(out, &feltMask);
+
+		display = out->clone();
+		drawHollowCircles(&display, circlesH, cv::Scalar(0, 0, 255));
+		imshow("Hough Candidates", display);
 
 		Mat filterMask = out->clone();
 		filterMask.setTo(0, feltMask);
@@ -1104,9 +1110,9 @@ void MyApplication()
 
 		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined, &feltMask);
 
-		Mat display = out->clone();
+		display = out->clone();
 		drawHollowCircles(&display, circlesH, cv::Scalar(0, 0, 255));
-		imshow("Hough Candidates", display);
+		imshow("Post-Filtering", display);
 
 		display = out->clone();
 		drawHollowCircles(&display, combined, cv::Scalar(255, 255, 255));
