@@ -107,11 +107,11 @@ struct Config
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateFilterPixelCountRadiusMultiplier = 1.0f;
-	float CandidateFilterLaplacianRadiusMultiplier = 0.6f;
-	float CandidateFilterLaplacianThreshold = 10000.0f;
+	float CandidateFilterLaplacianRadiusMultiplier = 2.0f;
+	float CandidateFilterLaplacianThreshold = 8000.0f;
 	//float CandidateFilterLaplacianThreshold = INFINITY;
-	float CandidateFilterEdgeDensityThreshold = 0.175f;
-	//float CandidateFilterEdgeDensityThreshold = INFINITY;
+	//float CandidateFilterEdgeDensityThreshold = 0.2f;
+	float CandidateFilterEdgeDensityThreshold = INFINITY;
 	float CandidateCombineDistanceThreshold = 15.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
@@ -241,11 +241,8 @@ cv::Point2f transformToEvalTable(cv::Point2f point, cv::Point2f* srcPoints, size
 
 double getLaplacianScore(const Mat& image, const Mat& circleMask)
 {
-	Mat gray, laplacian;
-
-	cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-
-	cv::Laplacian(gray, laplacian, CV_64F);
+	Mat laplacian;
+	cv::Laplacian(image, laplacian, CV_64F);
 
 	cv::Scalar _, stddev;
 	cv::meanStdDev(laplacian, _, stddev, circleMask);
@@ -255,11 +252,8 @@ double getLaplacianScore(const Mat& image, const Mat& circleMask)
 
 double getEdgeDensityScore(const Mat& image, const Mat& circleMask)
 {
-	Mat gray, edges;
-
-	cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
-
-	cv::Canny(gray, edges, 50, 150);
+	Mat edges;
+	cv::Canny(image, edges, 50, 150);
 
 	int edgePixels = cv::countNonZero(edges & circleMask);
 	int totalPixels = cv::countNonZero(circleMask);
@@ -272,12 +266,21 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 	std::vector<BallCandidate> filtered;
 
 	Mat nonZeroMask;
-	if (image.channels() == 3)
-		cv::cvtColor(image, nonZeroMask, cv::COLOR_BGR2GRAY);
-	else
-		nonZeroMask = image;
+	{
+		if (image.channels() == 3)
+			cv::cvtColor(image, nonZeroMask, cv::COLOR_BGR2GRAY);
+		else
+			nonZeroMask = image;
+		cv::threshold(nonZeroMask, nonZeroMask, 0, 255, cv::THRESH_BINARY);
+	}
 
-	cv::threshold(nonZeroMask, nonZeroMask, 0, 255, cv::THRESH_BINARY);
+	Mat lum;
+	{
+		cv::cvtColor(image, lum, cv::COLOR_BGR2HSV);
+		cv::extractChannel(lum, lum, 2);
+	}
+
+	imshow("lum", lum);
 
 	Mat circleMask = Mat::zeros(image.size(), CV_8UC1);
 
@@ -311,11 +314,11 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 				cv::FILLED
 			);
 
-			float laplacianScore = getLaplacianScore(image, circleMask);
-			float edgeDensityScore = getEdgeDensityScore(image, circleMask);
+			float laplacianScore = getLaplacianScore(lum, circleMask);
+			float edgeDensityScore = getEdgeDensityScore(lum, circleMask);
 
-			bool isOverNet = laplacianScore >= s_Config.CandidateFilterLaplacianThreshold || edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;
-			if (isOverNet)
+			bool isHighFreqPixels = laplacianScore >= s_Config.CandidateFilterLaplacianThreshold || edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;
+			if (isHighFreqPixels)
 				continue;
 		}
 
