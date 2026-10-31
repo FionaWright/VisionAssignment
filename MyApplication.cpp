@@ -107,6 +107,7 @@ struct Config
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateFilterRadiusMultiplier = 1.0f;
+	float CandidateFilterLaplacianThreshold = 10000.0f;
 	float CandidateCombineDistanceThreshold = 15.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
@@ -234,6 +235,20 @@ cv::Point2f transformToEvalTable(cv::Point2f point, cv::Point2f* srcPoints, size
 	return point;
 }
 
+double getLaplacianScore(const cv::Mat& image, const Mat& circleMask, const cv::Point& center, int radius)
+{
+	cv::Mat gray, laplacian;
+
+	cv::cvtColor(image, gray, cv::COLOR_BGR2GRAY);
+
+	cv::Laplacian(gray, laplacian, CV_64F);
+
+	cv::Scalar _, stddev;
+	cv::meanStdDev(laplacian, _, stddev, circleMask);
+
+	return stddev[0] * stddev[0];
+}
+
 std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const cv::Mat& image, double threshold)
 {
 	std::vector<BallCandidate> filtered;
@@ -276,6 +291,12 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 			cv::Scalar(255),
 			cv::FILLED
 		);
+
+		float laplacianScore = getLaplacianScore(image, circleMask, center, radius);
+
+		bool isOverNet = laplacianScore >= s_Config.CandidateFilterLaplacianThreshold;
+		if (isOverNet)
+			continue;
 
 		double totalPixels = cv::countNonZero(circleMask);
 
