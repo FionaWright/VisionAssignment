@@ -84,10 +84,10 @@ struct Config
 	float FeltMaskGaussianStrength = 1.2f;
 
 	// Canny
-	int CannyWeakThreshold = 20;
+	int CannyWeakThreshold = 17;
 	int CannyStrongThreshold = 30;
-	int CannyNumDilations = 4;
-	int CannyNumErosions = 1;
+	int CannyNumDilations = 5;
+	int CannyNumErosions = 2;
 
 	// Flood Fill
 	float FloodFillToleranceHue = 5;
@@ -98,14 +98,14 @@ struct Config
 	int HoughGaussianKernel = 7;
 	float HoughGaussianStrength = 1.2f;
 	double HoughInverseAccumReso = 1.2;
-	double HoughMinCenterDistance = 17.5;
-	double HoughUpperCannyThreshold = 95;
+	double HoughMinCenterDistance = 15.0;
+	double HoughUpperCannyThreshold = 90;
 	double HoughAccumThreshold = 9.45;
 	int HoughMinRadius = 22;
 	int HoughMaxRadius = 24;
 
 	// Candidate Filters
-	float CandidateFilterNonZeroThreshold = 0.93f; 
+	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateFilterPixelCountRadiusMultiplier = 1.0f;
 	float CandidateFilterLaplacianRadiusMultiplier = 2.0f;
 	float CandidateFilterLaplacianThreshold = 8000.0f;
