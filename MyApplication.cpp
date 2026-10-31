@@ -101,7 +101,7 @@ struct Config
 	double HoughMinCenterDistance = 10.0;
 	double HoughUpperCannyThreshold = 95;
 	double HoughAccumThreshold = 9.0;
-	int HoughMinRadius = 23;
+	int HoughMinRadius = 22;
 	int HoughMaxRadius = 24;
 
 	// Candidate Filters
