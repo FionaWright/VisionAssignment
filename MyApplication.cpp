@@ -85,14 +85,9 @@ struct Config
 
 	// Canny
 	int CannyWeakThreshold = 17;
-	int CannyStrongThreshold = 30;
+	int CannyStrongThreshold = 35;
 	int CannyNumDilations = 5;
 	int CannyNumErosions = 2;
-
-	// Flood Fill
-	float FloodFillToleranceHue = 5;
-	float FloodFillToleranceLightness = 25;
-	float FloodFillToleranceValue = 25;
 
 	// Hough Transform
 	int HoughGaussianKernel = 7;
@@ -106,7 +101,7 @@ struct Config
 
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.9f; 
-	float CandidateFilterPixelCountRadiusMultiplier = 1.0f;
+	float CandidateFilterPixelCountRadiusMultiplier = 0.9f;
 	float CandidateFilterLaplacianRadiusMultiplier = 2.0f;
 	float CandidateFilterLaplacianThreshold = 8000.0f;
 	//float CandidateFilterLaplacianThreshold = INFINITY;
