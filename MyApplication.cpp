@@ -44,6 +44,11 @@ struct AssignedCandidate
 	BallID ID;
 };
 
+#define NW 0
+#define NE 1
+#define SE 2
+#define SW 3
+
 struct Config
 {
 	// Input
@@ -101,6 +106,7 @@ struct Config
 
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.88f; 
+	float CandidateFilterRadiusMultiplier = 1.0f;
 	float CandidateCombineDistanceThreshold = 21.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
@@ -248,7 +254,17 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 
 		cv::Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
 
-		float radius = cvRound(candidate.Radius);
+		// If circle within bounds, allow OOB pixels to be counted
+		Mat includeMask = nonZeroMask.clone();
+		if ((center.y >= s_Config.TablePoints[NW].y || center.y >= s_Config.TablePoints[NE].y) &&
+			(center.y <= s_Config.TablePoints[SW].y || center.y <= s_Config.TablePoints[SE].y) &&
+			(center.x >= s_Config.TablePoints[NW].x || center.x >= s_Config.TablePoints[NE].x) &&
+			(center.x <= s_Config.TablePoints[SW].x || center.x <= s_Config.TablePoints[SE].x))
+		{
+			crop(&includeMask, &includeMask, s_Config.TablePoints, 255);
+		}
+
+		float radius = cvRound(candidate.Radius) * s_Config.CandidateFilterRadiusMultiplier;
 
 		if (radius <= 0.0f)
 			continue;
@@ -267,7 +283,7 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 			continue;
 
 		cv::Mat intersection;
-		cv::bitwise_and(nonZeroMask, circleMask, intersection);
+		cv::bitwise_and(includeMask, circleMask, intersection);
 
 		double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
 
@@ -1101,7 +1117,6 @@ void MyApplication()
 
 		Mat filterMask = out->clone();
 		filterMask.setTo(0, feltMask);
-		//crop(&filterMask, &filterMask, s_Config.TablePoints, 255); // TODO: ?
 		circlesH = filterCandidates(circlesH, filterMask, s_Config.CandidateFilterNonZeroThreshold);
 
 		std::vector<BallCandidate> candidates;
