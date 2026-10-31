@@ -105,7 +105,7 @@ struct Config
 	int HoughMaxRadius = 24;
 
 	// Candidate Filters
-	float CandidateFilterNonZeroThreshold = 0.88f; 
+	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateFilterRadiusMultiplier = 1.0f;
 	float CandidateCombineDistanceThreshold = 15.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
