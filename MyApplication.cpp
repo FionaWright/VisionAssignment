@@ -103,13 +103,17 @@ struct Config
 	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateFilterPixelCountRadiusMultiplier = 0.9f;
 	float CandidateFilterLaplacianRadiusMultiplier = 2.0f;
-	float CandidateFilterLaplacianThreshold = 8000.0f;
+	float CandidateFilterLaplacianThresholdUpper = 8000.0f;
+	float CandidateFilterLaplacianThresholdLower = 500.0f;
 	//float CandidateFilterLaplacianThreshold = INFINITY;
 	//float CandidateFilterEdgeDensityThreshold = 0.2f;
 	float CandidateFilterEdgeDensityThreshold = INFINITY;
 	float CandidateCombineDistanceThreshold = 15.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
+	int CandidateFilterHighlightMinLightness = 244;
+	int CandidateFilterHighlightMinPixels = 5;
+	float CandidateFilterHighlightRadiusMultiplier = 0.6f;
 
 	// Recognition
 	float LabGaussianStdDev = 9.0f;
@@ -251,6 +255,134 @@ double getEdgeDensityScore(const Mat& image, const Mat& circleMask)
 	return static_cast<double>(edgePixels) / totalPixels;
 }
 
+float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = s_Config.LabGaussianStdDev)
+{
+	cv::Vec3f d = observedLab - expectedLab;
+
+	d[0] *= s_Config.LabDistanceWeightLightness;
+	d[1] *= s_Config.LabDistanceWeightRedGreen;
+	d[2] *= s_Config.LabDistanceWeightBlueYellow;
+
+	float dist = std::sqrt(d.dot(d));
+
+	return std::exp(-(dist * dist) / (2.0f * sigma * sigma)); // Gaussian
+}
+
+float averageColorWeight(
+	const Mat& labImage,
+	const Mat& discardMask,
+	const BallCandidate& candidate,
+	const cv::Vec3f& expectedLab,
+	float sigma = s_Config.LabGaussianStdDev)
+{
+	Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
+	int radius = cvRound(candidate.Radius);
+
+	cv::Rect bounds(0, 0, labImage.cols, labImage.rows);
+	cv::Rect roi(
+		center.x - radius,
+		center.y - radius,
+		radius * 2 + 1,
+		radius * 2 + 1);
+
+	roi &= bounds;
+	if (roi.empty())
+		return 0.0f;
+
+	Mat circleMask = Mat::zeros(roi.size(), CV_8UC1);
+	Point localCenter(center.x - roi.x, center.y - roi.y);
+	cv::circle(circleMask, localCenter, radius, cv::Scalar(255), cv::FILLED);
+
+	double totalWeight = 0.0;
+	int pixelCount = 0;
+
+	for (int y = 0; y < roi.height; ++y)
+	{
+		for (int x = 0; x < roi.width; ++x)
+		{
+			if (circleMask.at<uchar>(y, x) == 0)
+				continue;
+
+			int imgX = roi.x + x;
+			int imgY = roi.y + y;
+			if (discardMask.at<uchar>(imgY, imgX) >= 1)
+				continue;
+
+			cv::Vec3b pixel = labImage.at<cv::Vec3b>(imgY, imgX);
+			cv::Vec3f pixelLab(pixel[0] * (100.0f / 255.0f), pixel[1] - 128.0f, pixel[2] - 128.0f);
+
+			totalWeight += colorWeight(pixelLab, expectedLab, sigma);
+			++pixelCount;
+		}
+	}
+
+	return pixelCount > 0 ? static_cast<float>(totalWeight / pixelCount) : 0.0f;
+}
+
+bool hasSpecularHighlight(
+	const cv::Mat& lum,
+	const cv::Mat& includeMask,
+	const BallCandidate& candidate)
+{
+	cv::Point center(
+		cvRound(candidate.Center.x),
+		cvRound(candidate.Center.y));
+
+	int radius = cvRound(candidate.Radius);
+	float radiusMod = radius * s_Config.CandidateFilterHighlightRadiusMultiplier;
+
+	cv::Rect bounds(0, 0, lum.cols, lum.rows);
+	cv::Rect roi(
+		center.x - radiusMod,
+		center.y - radiusMod,
+		radiusMod * 2 + 1,
+		radiusMod * 2 + 1);
+
+	roi &= bounds;
+
+	if (roi.empty())
+		return false;
+
+	cv::Mat circleMask = cv::Mat::zeros(roi.size(), CV_8UC1);
+
+	cv::Point localCenter(
+		center.x - roi.x,
+		center.y - roi.y);
+
+	cv::circle(
+		circleMask, localCenter, radiusMod,
+		cv::Scalar(255), cv::FILLED);
+
+	int highlightPixels = 0;
+
+	for (int y = 0; y < roi.height; ++y)
+	{
+		for (int x = 0; x < roi.width; ++x)
+		{
+			if (circleMask.at<uchar>(y, x) == 0)
+				continue;
+
+			int imgX = roi.x + x;
+			int imgY = roi.y + y;
+
+			if (includeMask.at<uchar>(imgY, imgX) == 0)
+				continue;
+
+			uchar L = lum.at<uchar>(imgY, imgX);
+
+			if (L >= s_Config.CandidateFilterHighlightMinLightness)
+			{
+				++highlightPixels;
+
+				if (highlightPixels >= s_Config.CandidateFilterHighlightMinPixels)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const Mat& image, double threshold)
 {
 	std::vector<BallCandidate> filtered;
@@ -302,11 +434,22 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 				cv::FILLED
 			);
 
-			float laplacianScore = getLaplacianScore(lum, circleMask);
-			float edgeDensityScore = getEdgeDensityScore(lum, circleMask);
+			Mat intersection;
+			cv::bitwise_and(includeMask, circleMask, intersection);
 
-			bool isHighFreqPixels = laplacianScore >= s_Config.CandidateFilterLaplacianThreshold || edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;
-			if (isHighFreqPixels)
+			float laplacianScore = getLaplacianScore(lum, intersection);
+			float edgeDensityScore = getEdgeDensityScore(lum, intersection);
+
+			bool isInvalid = laplacianScore >= s_Config.CandidateFilterLaplacianThresholdUpper;  // Net Samples
+			isInvalid |= laplacianScore < s_Config.CandidateFilterLaplacianThresholdLower;		 // Felt Samples
+			isInvalid |= edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;		 // Net Samples (Failing)
+			if (isInvalid)
+				continue;
+		}
+
+		// Specular Check
+		{
+			if (!hasSpecularHighlight(lum, includeMask, candidate))
 				continue;
 		}
 
@@ -535,70 +678,6 @@ std::vector<BallCandidate> combineCircles(
 	}
 
 	return result;
-}
-
-float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = s_Config.LabGaussianStdDev)
-{
-	cv::Vec3f d = observedLab - expectedLab;
-
-	d[0] *= s_Config.LabDistanceWeightLightness;
-	d[1] *= s_Config.LabDistanceWeightRedGreen;
-	d[2] *= s_Config.LabDistanceWeightBlueYellow;
-
-	float dist = std::sqrt(d.dot(d));
-
-	return std::exp(-(dist * dist) / (2.0f * sigma * sigma)); // Gaussian
-}
-
-float averageColorWeight(
-	const Mat& labImage,
-	const Mat& discardMask,
-	const BallCandidate& candidate,
-	const cv::Vec3f& expectedLab,
-	float sigma = s_Config.LabGaussianStdDev)
-{
-	Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
-	int radius = cvRound(candidate.Radius);
-
-	cv::Rect bounds(0, 0, labImage.cols, labImage.rows);
-	cv::Rect roi(
-		center.x - radius,
-		center.y - radius,
-		radius * 2 + 1,
-		radius * 2 + 1);
-
-	roi &= bounds;
-	if (roi.empty())
-		return 0.0f;
-
-	Mat circleMask = Mat::zeros(roi.size(), CV_8UC1);
-	Point localCenter(center.x - roi.x, center.y - roi.y);
-	cv::circle(circleMask, localCenter, radius, cv::Scalar(255), cv::FILLED);
-
-	double totalWeight = 0.0;
-	int pixelCount = 0;
-
-	for (int y = 0; y < roi.height; ++y)
-	{
-		for (int x = 0; x < roi.width; ++x)
-		{
-			if (circleMask.at<uchar>(y, x) == 0)
-				continue;
-
-			int imgX = roi.x + x;
-			int imgY = roi.y + y;
-			if (discardMask.at<uchar>(imgY, imgX) == 1)
-				continue;
-
-			cv::Vec3b pixel = labImage.at<cv::Vec3b>(imgY, imgX);
-			cv::Vec3f pixelLab(pixel[0] * (100.0f / 255.0f), pixel[1] - 128.0f, pixel[2] - 128.0f);
-
-			totalWeight += colorWeight(pixelLab, expectedLab, sigma);
-			++pixelCount;
-		}
-	}
-
-	return pixelCount > 0 ? static_cast<float>(totalWeight / pixelCount) : 0.0f;
 }
 
 void printWeightMatrix(const std::vector<std::vector<float>>& weightMatrix)
