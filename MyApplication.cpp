@@ -114,7 +114,8 @@ struct Config
 	int CandidateFilterHighlightMinPixels = 5;
 	float CandidateFilterHighlightRadiusMultiplier = 0.6f;
 
-	float CandidateCombineDistanceThreshold = 15.0f;
+	float CandidateCombineDistanceThresholdX = 30.0f;
+	float CandidateCombineDistanceThresholdY = 8.0f;
 	float CandidateCombineRadiusThreshold = 8.0f;
 	float OverlapRejectionThreshold = 1.0f;
 
@@ -652,7 +653,6 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 
 std::vector<BallCandidate> combineCircles(
 	const std::vector<BallCandidate>& candidates,
-	float centerThreshold = 15.0f,
 	float radiusThreshold = 8.0f)
 {
 	std::vector<bool> used(candidates.size(), false);
@@ -674,10 +674,9 @@ std::vector<BallCandidate> combineCircles(
 			float dx = candidates[i].Center.x - candidates[j].Center.x;
 			float dy = candidates[i].Center.y - candidates[j].Center.y;
 
-			float d = std::sqrt(dx * dx + dy * dy);
 			float dr = std::abs(candidates[i].Radius - candidates[j].Radius);
 
-			if (d <= centerThreshold && dr <= radiusThreshold)
+			if (abs(dx) <= s_Config.CandidateCombineDistanceThresholdX && abs(dy) <= s_Config.CandidateCombineDistanceThresholdY && dr <= radiusThreshold)
 			{
 				used[j] = true;
 				sumX += candidates[j].Center.x;
@@ -1311,7 +1310,7 @@ void MyApplication()
 
 		std::vector<BallCandidate> candidates;
 		candidates.insert(candidates.end(), circlesH.begin(), circlesH.end());
-		std::vector<BallCandidate> combined = combineCircles(candidates, s_Config.CandidateCombineDistanceThreshold, s_Config.CandidateCombineRadiusThreshold);
+		std::vector<BallCandidate> combined = combineCircles(candidates, s_Config.CandidateCombineRadiusThreshold);
 
 		std::vector<AssignedCandidate> assignedList = findBestFits(out, combined, &feltMask);
 
