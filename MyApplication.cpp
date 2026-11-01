@@ -123,6 +123,19 @@ struct Config
 	float LabDistanceWeightLightness = 0.5f;
 	float LabDistanceWeightRedGreen = 1.0f;
 	float LabDistanceWeightBlueYellow = 1.0f;
+	float PixelCountWeight = 0.002f;
+
+	float WhiteBlackContribWeight = 1.0f;
+	float WhiteBlackSpecularWeight = 0.1f;
+
+	float SolidMainContribWeight = 1.0f;
+	float SolidWhiteWeight = -0.1f;
+	float SolidSpecularWeight = 0.1f;
+
+	float StripesMainContribWeight = 0.7f;
+	float StripesWhiteWeight = 0.35f;
+	float StripesSpecularWeight = 0.05f;
+
 	float RecognitionRadiusMult = 0.9f;
 	float RecognitionMinWeightThreshold = 0.01f;
 	bool UseHungarianSolver = true;
@@ -276,6 +289,7 @@ float averageColorWeight(
 	const Mat& discardMask,
 	const BallCandidate& candidate,
 	const cv::Vec3f& expectedLab,
+	int& pixelCount,
 	float sigma = s_Config.LabGaussianStdDev)
 {
 	Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
@@ -297,7 +311,7 @@ float averageColorWeight(
 	cv::circle(circleMask, localCenter, radius, cv::Scalar(255), cv::FILLED);
 
 	double totalWeight = 0.0;
-	int pixelCount = 0;
+	pixelCount = 0;
 
 	for (int y = 0; y < roi.height; ++y)
 	{
@@ -839,17 +853,6 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			cv::circle(discardMask, candidates[other].Center, candidates[other].Radius, 255, cv::FILLED);
 		}
 
-		float WhiteBlackContribWeight = 2.0f;
-		float WhiteBlackSpecularWeight = 0.1f;
-
-		float SolidMainContribWeight = 1.0f;
-		float SolidWhiteWeight = -0.1f;
-		float SolidSpecularWeight = 0.1f;
-
-		float StripesMainContribWeight = 0.6f;
-		float StripesWhiteWeight = 0.35f;
-		float StripesSpecularWeight = 0.05f;
-
 		std::vector<float> weights;
 
 		for (uint32_t j = 0; j < BallID::eCount; j++)
@@ -860,30 +863,31 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 			cv::Vec3f whiteLab = paletteLab[BallID::eWhite];
 			cv::Vec3f specularWhiteLab = cv::Vec3f(100.0f, 0.0f, 0.0f);
 
-			float contrib = averageColorWeight(lab, discardMask, candidate, expectedLab);
-			float whiteContrib = averageColorWeight(lab, discardMask, candidate, whiteLab);
-			float specularContrib = averageColorWeight(lab, discardMask, candidate, specularWhiteLab);
-
-			// TODO: Multiply weight by radius? 
+			int pixelCount;
+			float contrib = averageColorWeight(lab, discardMask, candidate, expectedLab, pixelCount);
+			float whiteContrib = averageColorWeight(lab, discardMask, candidate, whiteLab, pixelCount);
+			float specularContrib = averageColorWeight(lab, discardMask, candidate, specularWhiteLab, pixelCount);
 
 			float weight = 0.0f;
 
+			float pixelCountWeight = pixelCount * s_Config.PixelCountWeight;
+
 			if (j == BallID::eWhite || j == BallID::eBlack)
 			{
-				weight += contrib * WhiteBlackContribWeight;
-				weight += specularContrib * WhiteBlackSpecularWeight;
+				weight += contrib * s_Config.WhiteBlackContribWeight * pixelCountWeight;
+				weight += specularContrib * s_Config.WhiteBlackSpecularWeight;
 			}
 			else if (BallIdIsStriped(j)) 
 			{
-				weight += contrib * StripesMainContribWeight;
-				weight += whiteContrib * StripesWhiteWeight;
-				weight += specularContrib * StripesSpecularWeight;
+				weight += contrib * s_Config.StripesMainContribWeight * pixelCountWeight;
+				weight += whiteContrib * s_Config.StripesWhiteWeight;
+				weight += specularContrib * s_Config.StripesSpecularWeight;
 			}
 			else
 			{
-				weight += contrib * SolidMainContribWeight;
-				weight += whiteContrib * SolidWhiteWeight;
-				weight += specularContrib * SolidSpecularWeight;
+				weight += contrib * s_Config.SolidMainContribWeight * pixelCountWeight;
+				weight += whiteContrib * s_Config.SolidWhiteWeight;
+				weight += specularContrib * s_Config.SolidSpecularWeight;
 			}
 
 			if (weight < s_Config.RecognitionMinWeightThreshold)
@@ -1347,26 +1351,3 @@ void MyApplication()
 	totalScore /= float(s_Config.FileNameList.size());
 	std::cout << "Total Score:		      " << totalScore << std::endl;
 }
-
-/*
-* 
-* TODO:
-* 
-* Figure out how to get the tucked green ball sample
-* Figure out flood fill seed stochastically / chunking / multi-scale?
-*/
-
-/*
-
-Best Scores:
-
-AllBalls.jpeg normalized score: 0.940
-Table1.jpeg normalized score: 5.802
-Table2.jpeg normalized score: 3.519
-Table3.jpeg normalized score: 3.697
-Table4.jpeg normalized score: 2.971
-Table5.jpeg normalized score: 4.391
-Table6.jpeg normalized score: 3.237
-Total Score:                  24.556
-
-*/
