@@ -124,17 +124,17 @@ struct Config
 	float LabDistanceWeightLightness = 0.5f;
 	float LabDistanceWeightRedGreen = 1.0f;
 	float LabDistanceWeightBlueYellow = 1.0f;
-	float PixelCountWeight = 0.002f;
+	float PixelCountWeight = 0.003f;
 
-	float WhiteBlackContribWeight = 1.0f;
+	float WhiteBlackContribWeight = 2.0f;
 	float WhiteBlackSpecularWeight = 0.1f;
 
 	float SolidMainContribWeight = 1.0f;
 	float SolidWhiteWeight = -0.1f;
 	float SolidSpecularWeight = 0.1f;
 
-	float StripesMainContribWeight = 0.7f;
-	float StripesWhiteWeight = 0.35f;
+	float StripesMainContribWeight = 0.9f;
+	float StripesWhiteWeight = 0.2f;
 	float StripesSpecularWeight = 0.05f;
 
 	float RecognitionRadiusMult = 0.9f;
