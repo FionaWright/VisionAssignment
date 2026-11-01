@@ -133,22 +133,22 @@ struct Config
 	float SolidWhiteWeight = -0.1f;
 	float SolidSpecularWeight = 0.1f;
 
-	float StripesMainContribWeight = 0.9f;
-	float StripesWhiteWeight = 0.2f;
+	float StripesMainContribWeight = 0.8f;
+	float StripesWhiteWeight = 0.35f;
 	float StripesSpecularWeight = 0.05f;
 
 	float RecognitionRadiusMult = 0.9f;
 	float RecognitionMinWeightThreshold = 0.01f;
 	bool UseHungarianSolver = true;
 	std::vector<cv::Vec3f> RecognitionPalette = {
-		{0.9f,  0.8f,  0.5f},  // 00: White
+		{0.93f, 0.87f, 0.7f},  // 00: White
 		{0.98f, 0.76f,  0.0f},  // 01: Yellow
 		{0.17f, 0.2f, 0.49f},  // 02: Blue
 		{0.9f,  0.0f,  0.0f},  // 03: Red
 		{0.23f, 0.15f, 0.35f},  // 04: Purple
 		{0.96f, 0.44f, 0.22f},  // 05: Orange
 		{0.0f,  0.1f,  0.0f},  // 06: Green
-		{0.3f,  0.05f, 0.05f}, // 07: Brown
+		{0.5f, 0.19f, 0.21f}, // 07: Brown
 		{0.01f,  0.02f,  0.01f},  // 08: Black
 	};
 
