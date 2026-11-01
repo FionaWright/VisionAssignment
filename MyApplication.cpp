@@ -532,16 +532,12 @@ Point findCenterSeed(const Mat& mask)
 
 void computeFeltMask(Mat* src, Mat* dst)
 {
-	Mat HLS, H, L, S;
+	Mat HLS;
 	{
 		cv::cvtColor(*src, HLS, cv::COLOR_BGR2HLS);
 
 		std::vector<Mat> channels;
 		cv::split(HLS, channels);
-
-		H = channels[0];
-		L = channels[1];
-		S = channels[2];
 	}
 
 	Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(s_Config.FeltMaskMorphKernel, s_Config.FeltMaskMorphKernel));
@@ -598,7 +594,7 @@ void computeFeltMask(Mat* src, Mat* dst)
 
 std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 {
-	Mat H, L, S;
+	Mat L;
 	{
 		Mat hls;
 		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
@@ -606,14 +602,11 @@ std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
 		std::vector<Mat> channels;
 		cv::split(hls, channels);
 
-		H = channels[0];
 		L = channels[1];
-		S = channels[2];
 	}
 
 	Mat gray;
 	{
-		//cv::cvtColor(*image, gray, cv::COLOR_BGR2GRAY);
 		gray = L;
 
 		cv::GaussianBlur(gray, gray, cv::Size(s_Config.HoughGaussianKernel, s_Config.HoughGaussianKernel), s_Config.HoughGaussianStrength);
@@ -722,88 +715,88 @@ void printWeightMatrix(const std::vector<std::vector<float>>& weightMatrix)
 	}
 }
 
+// https://www.geeksforgeeks.org/dsa/hungarian-algorithm-assignment-problem-set-1-introduction/
 std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMatrix)
 {
-	const int N = static_cast<int>(weightMatrix.size());
-	if (N == 0)
+	const int numRows = static_cast<int>(weightMatrix.size());
+	if (numRows == 0)
 		return {};
 
-	const int M = static_cast<int>(weightMatrix[0].size());
+	const int numCols = static_cast<int>(weightMatrix[0].size());
 
-	if (M < N)
+	if (numCols < numRows)
 		throw std::invalid_argument("Hungarian algorithm requires columns >= rows");
 
-	std::vector<double> u(N + 1), v(M + 1);
-	std::vector<int> p(M + 1), way(M + 1);
+	std::vector<double> potentialsRows(numRows + 1), potentialsCols(numCols + 1);
+	std::vector<int> currAssignments(numCols + 1), way(numCols + 1);
 
-	for (int i = 1; i <= N; ++i)
+	for (int row = 1; row <= numRows; ++row)
 	{
-		p[0] = i;
-		int j0 = 0;
-		std::vector<double> minv(
-			M + 1, std::numeric_limits<double>::infinity());
-		std::vector<bool> used(M + 1, false);
+		currAssignments[0] = row;
+		int col0 = 0;
+		std::vector<double> minReducedCosts(numCols + 1, std::numeric_limits<double>::infinity());
+		std::vector<bool> used(numCols + 1, false);
 
 		do
 		{
-			used[j0] = true;
-			int i0 = p[j0];
+			used[col0] = true;
+			int row0 = currAssignments[col0];
 			double delta = std::numeric_limits<double>::infinity();
-			int j1 = 0;
+			int col1 = 0;
 
-			for (int j = 1; j <= M; ++j)
+			for (int col = 1; col <= numCols; ++col)
 			{
-				if (used[j])
+				if (used[col])
 					continue;
 
-				double cost = -weightMatrix[i0 - 1][j - 1];
-				double cur = cost - u[i0] - v[j];
+				double cost = -weightMatrix[row0 - 1][col - 1];
+				double current = cost - potentialsRows[row0] - potentialsRows[col]; // Reduced cost
 
-				if (cur < minv[j])
+				if (current < minReducedCosts[col])
 				{
-					minv[j] = cur;
-					way[j] = j0;
+					minReducedCosts[col] = current;
+					way[col] = col0;
 				}
 
-				if (minv[j] < delta)
+				if (minReducedCosts[col] < delta)
 				{
-					delta = minv[j];
-					j1 = j;
+					delta = minReducedCosts[col];
+					col1 = col;
 				}
 			}
 
-			for (int j = 0; j <= M; ++j)
+			for (int col = 0; col <= numCols; ++col)
 			{
-				if (used[j])
+				if (used[col])
 				{
-					u[p[j]] += delta;
-					v[j] -= delta;
+					potentialsRows[currAssignments[col]] += delta;
+					potentialsRows[col] -= delta;
 				}
 				else
 				{
-					minv[j] -= delta;
+					minReducedCosts[col] -= delta;
 				}
 			}
 
-			j0 = j1;
+			col0 = col1;
 		} 
-		while (p[j0] != 0);
+		while (currAssignments[col0] != 0);
 
 		do
 		{
-			int j1 = way[j0];
-			p[j0] = p[j1];
-			j0 = j1;
+			int row1 = way[col0];
+			currAssignments[col0] = currAssignments[row1];
+			col0 = row1;
 		} 
-		while (j0 != 0);
+		while (col0 != 0);
 	}
 
-	std::vector<int> assignment(N, -1);
+	std::vector<int> assignment(numRows, -1);
 
-	for (int j = 1; j <= M; ++j)
+	for (int row = 1; row <= numCols; ++row)
 	{
-		if (p[j] != 0)
-			assignment[p[j] - 1] = j - 1;
+		if (currAssignments[row] != 0)
+			assignment[currAssignments[row] - 1] = row - 1;
 	}
 
 	return assignment;
@@ -907,7 +900,7 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 	{
 		auto selectBall = [&](BallID ballId)
 		{
-			float maxWeight = -1.0f;
+			float maxWeight = 0.0f;
 			int maxIdx = -1;
 			for (uint32_t i = 0; i < candidates.size(); i++)
 			{
@@ -927,16 +920,16 @@ std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCa
 				assigned.Candidate = candidates[maxIdx];
 				assigned.ID = ballId;
 				assignedList.emplace_back(assigned);
-			}
 
-			for (uint32_t i = 0; i < candidates.size(); i++)
-			{
-				for (uint32_t j = 0; j < BallID::eCount; j++)
+				for (uint32_t i = 0; i < candidates.size(); i++)
 				{
-					if (i != maxIdx && j != ballId)
-						continue;
+					for (uint32_t j = 0; j < BallID::eCount; j++)
+					{
+						if (i != maxIdx && j != ballId)
+							continue;
 
-					weightMatrix[i][j] = 0.0f;
+						weightMatrix[i][j] = 0.0f;
+					}
 				}
 			}
 		};
