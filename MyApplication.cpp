@@ -102,18 +102,21 @@ struct Config
 	// Candidate Filters
 	float CandidateFilterNonZeroThreshold = 0.9f; 
 	float CandidateFilterPixelCountRadiusMultiplier = 0.9f;
-	float CandidateFilterLaplacianRadiusMultiplier = 2.0f;
-	float CandidateFilterLaplacianThresholdUpper = 8000.0f;
-	float CandidateFilterLaplacianThresholdLower = 500.0f;
+
+	float CandidateFilterLaplacianRadiusMultiplier = 0.95f;
+	float CandidateFilterLaplacianThresholdUpper = 13750.0f;
+	float CandidateFilterLaplacianThresholdLower = 0.0f;
 	//float CandidateFilterLaplacianThreshold = INFINITY;
 	//float CandidateFilterEdgeDensityThreshold = 0.2f;
 	float CandidateFilterEdgeDensityThreshold = INFINITY;
-	float CandidateCombineDistanceThreshold = 15.0f;
-	float CandidateCombineRadiusThreshold = 8.0f;
-	float OverlapRejectionThreshold = 1.0f;
+
 	int CandidateFilterHighlightMinLightness = 244;
 	int CandidateFilterHighlightMinPixels = 5;
 	float CandidateFilterHighlightRadiusMultiplier = 0.6f;
+
+	float CandidateCombineDistanceThreshold = 15.0f;
+	float CandidateCombineRadiusThreshold = 8.0f;
+	float OverlapRejectionThreshold = 1.0f;
 
 	// Recognition
 	float LabGaussianStdDev = 9.0f;
@@ -447,7 +450,7 @@ std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& ca
 				continue;
 		}
 
-		// Specular Check
+		// Specular Highlight Check
 		{
 			if (!hasSpecularHighlight(lum, includeMask, candidate))
 				continue;
