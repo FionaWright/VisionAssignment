@@ -54,8 +54,8 @@ struct Config
 	// Input
 	const char* FolderPath = "Media/Pool/";
 	std::vector<const char*> FileNameList = {
-		//"AllBalls.jpeg",
-		//"Table1.jpeg",
+		"AllBalls.jpeg",
+		"Table1.jpeg",
 		"Table2.jpeg",
 		"Table3.jpeg",
 		"Table4.jpeg",
@@ -147,7 +147,7 @@ struct Config
 		{0.9f,  0.0f,  0.0f},  // 03: Red
 		{0.23f, 0.15f, 0.35f},  // 04: Purple
 		{0.96f, 0.44f, 0.22f},  // 05: Orange
-		{0.0f,  0.1f,  0.0f},  // 06: Green
+		{0.15f, 0.37f, 0.24f},  // 06: Green
 		{0.5f, 0.19f, 0.21f}, // 07: Brown
 		{0.01f,  0.02f,  0.01f},  // 08: Black
 	};
@@ -727,8 +727,10 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 	if (numCols < numRows)
 		throw std::invalid_argument("Hungarian algorithm requires columns >= rows");
 
-	std::vector<double> potentialsRows(numRows + 1), potentialsCols(numCols + 1);
-	std::vector<int> currAssignments(numCols + 1), way(numCols + 1);
+	std::vector<double> potentialsRows(numRows + 1);
+	std::vector<double> potentialsCols(numCols + 1);
+	std::vector<int> currAssignments(numCols + 1);
+	std::vector<int> way(numCols + 1);
 
 	for (int row = 1; row <= numRows; ++row)
 	{
@@ -740,7 +742,7 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 		do
 		{
 			used[col0] = true;
-			int row0 = currAssignments[col0];
+			const int row0 = currAssignments[col0];
 			double delta = std::numeric_limits<double>::infinity();
 			int col1 = 0;
 
@@ -749,12 +751,12 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 				if (used[col])
 					continue;
 
-				double cost = -weightMatrix[row0 - 1][col - 1];
-				double current = cost - potentialsRows[row0] - potentialsRows[col]; // Reduced cost
+				const double cost = -weightMatrix[row0 - 1][col - 1];
+				const double reducedCost = cost - potentialsRows[row0] - potentialsCols[col]; // Reduced cost
 
-				if (current < minReducedCosts[col])
+				if (reducedCost < minReducedCosts[col])
 				{
-					minReducedCosts[col] = current;
+					minReducedCosts[col] = reducedCost;
 					way[col] = col0;
 				}
 
@@ -770,7 +772,7 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 				if (used[col])
 				{
 					potentialsRows[currAssignments[col]] += delta;
-					potentialsRows[col] -= delta;
+					potentialsCols[col] -= delta;
 				}
 				else
 				{
@@ -784,7 +786,7 @@ std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMa
 
 		do
 		{
-			int row1 = way[col0];
+			const int row1 = way[col0];
 			currAssignments[col0] = currAssignments[row1];
 			col0 = row1;
 		} 
@@ -1010,11 +1012,20 @@ void drawHollowCircles(
 	}
 }
 
-void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assignedList)
+void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assignedList, bool tableCoords = false)
 {
 	for (uint32_t i = 0; i < assignedList.size(); i++)
 	{ 
 		BallCandidate circle = assignedList[i].Candidate;
+
+		if (tableCoords)
+		{
+			cv::Point2f obsPoint(circle.Center.x, circle.Center.y);
+			obsPoint = transformToEvalTable(obsPoint, s_Config.TablePointsF, image->cols, image->rows);
+			circle.Center.x = obsPoint.x;
+			circle.Center.y = obsPoint.y;
+		}
+
 		cv::Vec3b color = s_Config.DrawPalette[assignedList[i].ID];
 		cv::circle(*image, circle.Center, circle.Radius, color, s_Config.CircleThickness);
 
@@ -1328,7 +1339,8 @@ void MyApplication()
 		perspectiveTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
 		cv::resize(display, display, cv::Size(1434, 683));
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
-		//imshow("Eval", display);
+		drawAssignedColors(&display, assignedList, true);
+		imshow("Eval", display);
 
 		if (!s_Config.RunAllImages)
 			cv::waitKey();
