@@ -54,8 +54,8 @@ struct Config
 	// Input
 	const char* FolderPath = "Media/Pool/";
 	std::vector<const char*> FileNameList = {
-		"AllBalls.jpeg",
-		"Table1.jpeg",
+		//"AllBalls.jpeg",
+		//"Table1.jpeg",
 		"Table2.jpeg",
 		"Table3.jpeg",
 		"Table4.jpeg",

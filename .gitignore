@@ -80,6 +80,6 @@ examples/example_sdl3_vulkan/example_sdl3_vulkan
 
 ## Other
 .vs/*
-x64/*
+**x64/*
 Media/*
 !Media/Pool/*
