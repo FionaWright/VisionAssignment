@@ -134,7 +134,7 @@ struct Config
 	float SolidSpecularWeight = 0.1f;
 
 	float StripesMainContribWeight = 0.8f;
-	float StripesWhiteWeight = 0.2f;
+	float StripesWhiteWeight = 0.35f;
 	float StripesSpecularWeight = 0.05f;
 
 	float RecognitionRadiusMult = 0.9f;
@@ -143,11 +143,11 @@ struct Config
 	std::vector<cv::Vec3f> RecognitionPalette = {
 		{0.93f, 0.87f, 0.7f},  // 00: White
 		{0.98f, 0.76f,  0.0f},  // 01: Yellow
-		{0.17f, 0.2f, 0.49f},  // 02: Blue
+		{0.17f, 0.17f, 0.35f},  // 02: Blue
 		{0.9f,  0.0f,  0.0f},  // 03: Red
-		{0.23f, 0.15f, 0.35f},  // 04: Purple
+		{0.32f, 0.22f, 0.41f},  // 04: Purple
 		{0.96f, 0.44f, 0.22f},  // 05: Orange
-		{0.15f, 0.37f, 0.24f},  // 06: Green
+		{0.0f,  0.1f,  0.0f},  // 06: Green
 		{0.5f, 0.19f, 0.21f}, // 07: Brown
 		{0.01f,  0.02f,  0.01f},  // 08: Black
 	};
