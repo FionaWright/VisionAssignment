@@ -134,7 +134,7 @@ struct Config
 	float SolidSpecularWeight = 0.1f;
 
 	float StripesMainContribWeight = 0.8f;
-	float StripesWhiteWeight = 0.35f;
+	float StripesWhiteWeight = 0.2f;
 	float StripesSpecularWeight = 0.05f;
 
 	float RecognitionRadiusMult = 0.9f;
