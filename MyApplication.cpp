@@ -62,7 +62,7 @@ struct Config
 		"Table5.jpeg",
 		"Table6.jpeg"
 	};
-	bool RunAllImages = false;
+	bool RunAllImages = true;
 
 	// Table
 	Point TablePoints[4] = { // NW, NE, SE, SW
@@ -140,15 +140,16 @@ struct Config
 	float RecognitionRadiusMult = 0.9f;
 	float RecognitionMinWeightThreshold = 0.01f;
 	bool UseHungarianSolver = true;
+
 	std::vector<cv::Vec3f> RecognitionPalette = {
-		{0.93f, 0.87f, 0.7f},  // 00: White
-		{0.98f, 0.76f,  0.0f},  // 01: Yellow
-		{0.17f, 0.17f, 0.35f},  // 02: Blue
-		{0.9f,  0.0f,  0.0f},  // 03: Red
-		{0.32f, 0.22f, 0.41f},  // 04: Purple
-		{0.96f, 0.44f, 0.22f},  // 05: Orange
-		{0.0f,  0.1f,  0.0f},  // 06: Green
-		{0.5f, 0.19f, 0.21f}, // 07: Brown
+		{0.93f, 0.87f, 0.7f},     // 00: White
+		{0.98f, 0.76f,  0.0f},    // 01: Yellow
+		{0.17f, 0.17f, 0.35f},    // 02: Blue
+		{0.9f,  0.0f,  0.0f},     // 03: Red
+		{0.32f, 0.22f, 0.41f},    // 04: Purple
+		{0.96f, 0.44f, 0.22f},    // 05: Orange
+		{0.0f,  0.1f,  0.0f},     // 06: Green
+		{0.5f, 0.19f, 0.21f},     // 07: Brown
 		{0.01f,  0.02f,  0.01f},  // 08: Black
 	};
 
@@ -1340,7 +1341,33 @@ void MyApplication()
 		cv::resize(display, display, cv::Size(1434, 683));
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
 		drawAssignedColors(&display, assignedList, true);
-		imshow("Eval", display);
+		//imshow("Eval", display);
+
+		std::cout << s_Config.FileNameList[i] << ":" << std::endl;
+		for (int i = 0; i < BallID::eCount; i++)
+		{
+			BallCandidate* candidate = nullptr;
+			for (int j = 0; j < assignedList.size(); j++)
+			{
+				if (assignedList[j].ID == i)
+				{
+					candidate = &assignedList[j].Candidate;
+					break;
+				}
+			}
+
+			std::cout << "Ball " << std::to_string(i) << ": ";
+
+			if (!candidate)
+			{
+				std::cout << "N/A" << std::endl;
+				continue;
+			}
+
+			cv::Point2f obsPoint(candidate->Center.x, candidate->Center.y);
+			obsPoint = transformToEvalTable(obsPoint, s_Config.TablePointsF, width, height);
+			std::cout << (int)round(obsPoint.x) << ", " << (int)round(obsPoint.y) << std::endl;
+		}
 
 		if (!s_Config.RunAllImages)
 			cv::waitKey();
