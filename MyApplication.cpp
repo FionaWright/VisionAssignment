@@ -3,18 +3,10 @@
 #include <opencv2/opencv.hpp>
 #include <cmath>
 
-enum CandidateSource
-{
-	eHough,
-	eContours,
-	eWatershed,
-};
-
 struct BallCandidate
 {
 	cv::Point2f Center;
 	float Radius;
-	CandidateSource Source;
 };
 
 enum BallID : uint32_t
@@ -44,10 +36,10 @@ struct AssignedCandidate
 	BallID ID;
 };
 
-#define NW 0
-#define NE 1
-#define SE 2
-#define SW 3
+#define TABLE_NW 0
+#define TABLE_NE 1
+#define TABLE_SE 2
+#define TABLE_SW 3
 
 struct Config
 {
@@ -62,7 +54,7 @@ struct Config
 		"Table5.jpeg",
 		"Table6.jpeg"
 	};
-	bool RunAllImages = false;
+	bool RunAllImages = true;
 
 	// Table
 	Point TablePoints[4] = { // NW, NE, SE, SW
@@ -71,7 +63,7 @@ struct Config
 		{1888, 451},
 		{38, 472},
 	};
-	cv::Point2f TablePointsF[4] = { 
+	cv::Point2f TablePointsF[4] = {
 		{337,  35},
 		{1570, 21},
 		{1888, 451},
@@ -100,15 +92,13 @@ struct Config
 	int HoughMaxRadius = 24;
 
 	// Candidate Filters
-	float CandidateFilterNonZeroThreshold = 0.9f; 
+	float CandidateFilterNonZeroThreshold = 0.9f;
 	float CandidateFilterPixelCountRadiusMultiplier = 0.9f;
 
 	float CandidateFilterLaplacianRadiusMultiplier = 0.95f;
 	float CandidateFilterLaplacianThresholdUpper = 13750.0f;
-	float CandidateFilterLaplacianThresholdLower = 0.0f;
-	//float CandidateFilterLaplacianThreshold = INFINITY;
-	//float CandidateFilterEdgeDensityThreshold = 0.2f;
-	float CandidateFilterEdgeDensityThreshold = INFINITY;
+	float CandidateFilterLaplacianThresholdLower = 0.0f;  // Disabled
+	float CandidateFilterEdgeDensityThreshold = INFINITY; // Disabled
 
 	int CandidateFilterHighlightMinLightness = 244;
 	int CandidateFilterHighlightMinPixels = 5;
@@ -145,7 +135,7 @@ struct Config
 		{0.93f, 0.87f, 0.7f},     // 00: White
 		{0.98f, 0.76f,  0.0f},    // 01: Yellow
 		{0.17f, 0.17f, 0.35f},    // 02: Blue
-		{0.94f, 0.23f, 0.25f},     // 03: Red
+		{0.94f, 0.23f, 0.25f},    // 03: Red
 		{0.32f, 0.22f, 0.41f},    // 04: Purple
 		{0.96f, 0.44f, 0.22f},    // 05: Orange
 		{0.0f,  0.1f,  0.0f},     // 06: Green
@@ -184,859 +174,6 @@ struct Config
 };
 static Config s_Config;
 
-bool BallIdIsStriped(int id) { return id >= 9; }
-
-void loadImage(Mat* image, const std::string& path)
-{
-	*image = imread(path, -1);
-
-	if (image->empty())
-	{
-		std::cout << "Could not open " << path << std::endl;
-	}
-}
-
-void crop(Mat* src, Mat* dst, Point* srcPoints, cv::Scalar value)
-{
-	Mat mask = Mat::zeros(src->size(), CV_8UC1);
-
-	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
-
-	*dst = src->clone();
-	dst->setTo(value, mask == 0);
-}
-
-void perspectiveTransform(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t width, size_t height)
-{
-	// NW, NE, SE, SW
-	cv::Point2f dstPoints[4] = {
-		{0.0f,          0.0f},
-		{width - 1.0f,   0.0f},
-		{width - 1.0f,   height - 1.0f},
-		{0.0f,           height - 1.0f}
-	};
-
-	Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
-
-	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
-}
-
-cv::Point2f perspectiveTransform(cv::Point2f point, cv::Point2f* srcPoints, size_t width, size_t height)
-{
-	// NW, NE, SE, SW
-	cv::Point2f dstPoints[4] = {
-		{0.0f,          0.0f},
-		{width - 1.0f,   0.0f},
-		{width - 1.0f,   height - 1.0f},
-		{0.0f,           height - 1.0f}
-	};
-
-	Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
-
-	std::vector<cv::Point2f> pointVec = { point };
-	std::vector<cv::Point2f> dst;
-
-	cv::perspectiveTransform(pointVec, dst, H);
-
-	return dst[0];
-}
-
-cv::Point2f transformToEvalTable(cv::Point2f point, cv::Point2f* srcPoints, size_t width, size_t height)
-{
-	point = perspectiveTransform(point, srcPoints, width, height);
-
-	point.x *= 1434.0f / float(width);
-	point.y *= 683.0f / float(height);
-
-	return point;
-}
-
-double getLaplacianScore(const Mat& image, const Mat& circleMask)
-{
-	Mat laplacian;
-	cv::Laplacian(image, laplacian, CV_64F);
-
-	cv::Scalar _, stddev;
-	cv::meanStdDev(laplacian, _, stddev, circleMask);
-
-	return stddev[0] * stddev[0];
-}
-
-double getEdgeDensityScore(const Mat& image, const Mat& circleMask)
-{
-	Mat edges;
-	cv::Canny(image, edges, 50, 150);
-
-	int edgePixels = cv::countNonZero(edges & circleMask);
-	int totalPixels = cv::countNonZero(circleMask);
-
-	return static_cast<double>(edgePixels) / totalPixels;
-}
-
-float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = s_Config.LabGaussianStdDev)
-{
-	cv::Vec3f d = observedLab - expectedLab;
-
-	d[0] *= s_Config.LabDistanceWeightLightness;
-	d[1] *= s_Config.LabDistanceWeightRedGreen;
-	d[2] *= s_Config.LabDistanceWeightBlueYellow;
-
-	float dist = std::sqrt(d.dot(d));
-
-	return std::exp(-(dist * dist) / (2.0f * sigma * sigma)); // Gaussian
-}
-
-float averageColorWeight(
-	const Mat& labImage,
-	const Mat& discardMask,
-	const BallCandidate& candidate,
-	const cv::Vec3f& expectedLab,
-	int& pixelCount,
-	float sigma = s_Config.LabGaussianStdDev)
-{
-	Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
-	int radius = cvRound(candidate.Radius);
-
-	cv::Rect bounds(0, 0, labImage.cols, labImage.rows);
-	cv::Rect roi(
-		center.x - radius,
-		center.y - radius,
-		radius * 2 + 1,
-		radius * 2 + 1);
-
-	roi &= bounds;
-	if (roi.empty())
-		return 0.0f;
-
-	Mat circleMask = Mat::zeros(roi.size(), CV_8UC1);
-	Point localCenter(center.x - roi.x, center.y - roi.y);
-	cv::circle(circleMask, localCenter, radius, cv::Scalar(255), cv::FILLED);
-
-	double totalWeight = 0.0;
-	pixelCount = 0;
-
-	for (int y = 0; y < roi.height; ++y)
-	{
-		for (int x = 0; x < roi.width; ++x)
-		{
-			if (circleMask.at<uchar>(y, x) == 0)
-				continue;
-
-			int imgX = roi.x + x;
-			int imgY = roi.y + y;
-			if (discardMask.at<uchar>(imgY, imgX) >= 1)
-				continue;
-
-			cv::Vec3b pixel = labImage.at<cv::Vec3b>(imgY, imgX);
-			cv::Vec3f pixelLab(pixel[0] * (100.0f / 255.0f), pixel[1] - 128.0f, pixel[2] - 128.0f);
-
-			totalWeight += colorWeight(pixelLab, expectedLab, sigma);
-			++pixelCount;
-		}
-	}
-
-	return pixelCount > 0 ? static_cast<float>(totalWeight / pixelCount) : 0.0f;
-}
-
-bool hasSpecularHighlight(
-	const cv::Mat& lum,
-	const cv::Mat& includeMask,
-	const BallCandidate& candidate)
-{
-	cv::Point center(
-		cvRound(candidate.Center.x),
-		cvRound(candidate.Center.y));
-
-	int radius = cvRound(candidate.Radius);
-	float radiusMod = radius * s_Config.CandidateFilterHighlightRadiusMultiplier;
-
-	cv::Rect bounds(0, 0, lum.cols, lum.rows);
-	cv::Rect roi(
-		center.x - radiusMod,
-		center.y - radiusMod,
-		radiusMod * 2 + 1,
-		radiusMod * 2 + 1);
-
-	roi &= bounds;
-
-	if (roi.empty())
-		return false;
-
-	cv::Mat circleMask = cv::Mat::zeros(roi.size(), CV_8UC1);
-
-	cv::Point localCenter(
-		center.x - roi.x,
-		center.y - roi.y);
-
-	cv::circle(
-		circleMask, localCenter, radiusMod,
-		cv::Scalar(255), cv::FILLED);
-
-	int highlightPixels = 0;
-
-	for (int y = 0; y < roi.height; ++y)
-	{
-		for (int x = 0; x < roi.width; ++x)
-		{
-			if (circleMask.at<uchar>(y, x) == 0)
-				continue;
-
-			int imgX = roi.x + x;
-			int imgY = roi.y + y;
-
-			if (includeMask.at<uchar>(imgY, imgX) == 0)
-				continue;
-
-			uchar L = lum.at<uchar>(imgY, imgX);
-
-			if (L >= s_Config.CandidateFilterHighlightMinLightness)
-			{
-				++highlightPixels;
-
-				if (highlightPixels >= s_Config.CandidateFilterHighlightMinPixels)
-					return true;
-			}
-		}
-	}
-
-	return false;
-}
-
-std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const Mat& image, double threshold)
-{
-	std::vector<BallCandidate> filtered;
-
-	Mat nonZeroMask;
-	{
-		if (image.channels() == 3)
-			cv::cvtColor(image, nonZeroMask, cv::COLOR_BGR2GRAY);
-		else
-			nonZeroMask = image;
-		cv::threshold(nonZeroMask, nonZeroMask, 0, 255, cv::THRESH_BINARY);
-	}
-
-	Mat lum;
-	{
-		cv::cvtColor(image, lum, cv::COLOR_BGR2HSV);
-		cv::extractChannel(lum, lum, 2);
-	}
-
-	Mat circleMask = Mat::zeros(image.size(), CV_8UC1);
-
-	for (const auto& candidate : candidates)
-	{
-		Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
-
-		// If circle within bounds, allow OOB pixels to be counted
-		Mat includeMask = nonZeroMask.clone();
-		if ((center.y >= s_Config.TablePoints[NW].y || center.y >= s_Config.TablePoints[NE].y) &&
-			(center.y <= s_Config.TablePoints[SW].y || center.y <= s_Config.TablePoints[SE].y) &&
-			(center.x >= s_Config.TablePoints[NW].x || center.x >= s_Config.TablePoints[NE].x) &&
-			(center.x <= s_Config.TablePoints[SW].x || center.x <= s_Config.TablePoints[SE].x))
-		{
-			crop(&includeMask, &includeMask, s_Config.TablePoints, 255);
-		}
-
-		float radius = cvRound(candidate.Radius);
-		if (radius <= 0.0f)
-			continue;
-
-		// Laplacian / edge density checks for net samples
-		{
-			float radiusMod = radius * s_Config.CandidateFilterLaplacianRadiusMultiplier;
-			circleMask.setTo(0);
-			cv::circle(
-				circleMask,
-				center,
-				radiusMod,
-				cv::Scalar(255),
-				cv::FILLED
-			);
-
-			Mat intersection;
-			cv::bitwise_and(includeMask, circleMask, intersection);
-
-			float laplacianScore = getLaplacianScore(lum, intersection);
-			float edgeDensityScore = getEdgeDensityScore(lum, intersection);
-
-			bool isInvalid = laplacianScore >= s_Config.CandidateFilterLaplacianThresholdUpper;  // Net Samples
-			isInvalid |= laplacianScore < s_Config.CandidateFilterLaplacianThresholdLower;		 // Felt Samples
-			isInvalid |= edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;		 // Net Samples (Failing)
-			if (isInvalid)
-				continue;
-		}
-
-		// Specular Highlight Check
-		{
-			if (!hasSpecularHighlight(lum, includeMask, candidate))
-				continue;
-		}
-
-		// Pixel count checks for felt samples
-		{
-			float radiusMod = radius * s_Config.CandidateFilterPixelCountRadiusMultiplier;
-			circleMask.setTo(0);
-			cv::circle(
-				circleMask,
-				center,
-				radiusMod,
-				cv::Scalar(255),
-				cv::FILLED
-			);
-
-			double totalPixels = cv::countNonZero(circleMask);
-			if (totalPixels == 0)
-				continue;
-
-			Mat intersection;
-			cv::bitwise_and(includeMask, circleMask, intersection);
-
-			double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
-			if (ratio < threshold)
-				continue;
-		}
-
-		filtered.push_back(candidate);
-	}
-
-	return filtered;
-}
-
-Point findCenterSeed(const Mat& mask)
-{
-	Point center(mask.cols / 2, mask.rows / 2);
-
-	std::vector<Point> points;
-	cv::findNonZero(mask, points);
-
-	if (points.empty())
-		return Point(-1, -1);
-
-	Point closest = points[0];
-	double minDist = DBL_MAX;
-
-	for (const Point& p : points)
-	{
-		double dx = p.x - center.x;
-		double dy = p.y - center.y;
-		double dist = dx * dx + dy * dy;
-
-		if (dist < minDist)
-		{
-			minDist = dist;
-			closest = p;
-		}
-	}
-
-	return closest;
-}
-
-void computeFeltMask(Mat* src, Mat* dst)
-{
-	Mat HLS;
-	{
-		cv::cvtColor(*src, HLS, cv::COLOR_BGR2HLS);
-
-		std::vector<Mat> channels;
-		cv::split(HLS, channels);
-	}
-
-	Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(s_Config.FeltMaskMorphKernel, s_Config.FeltMaskMorphKernel));
-
-	Mat inverseEdges;
-	{
-		Mat col = HLS;
-		cv::GaussianBlur(col, col, cv::Size(s_Config.FeltMaskGaussianKernel, s_Config.FeltMaskGaussianKernel), s_Config.FeltMaskGaussianStrength);
-
-		Mat edges;
-		cv::Canny(col, edges, s_Config.CannyWeakThreshold, s_Config.CannyStrongThreshold);
-
-		imshow("Edges", edges);
-
-		for (int i = 0; i < s_Config.CannyNumDilations; i++)
-			cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
-
-		for (int i = 0; i < s_Config.CannyNumErosions; i++)
-			cv::morphologyEx(edges, edges, cv::MORPH_ERODE, kernel);
-
-		cv::bitwise_not(edges, inverseEdges);
-	}
-
-	Mat feltMask;
-	{
-		Mat floodMask = Mat::zeros(inverseEdges.rows + 2, inverseEdges.cols + 2, CV_8UC1);
-
-		Point seed = findCenterSeed(inverseEdges);
-
-		cv::Scalar loDiff(1,1,1);
-		cv::Scalar upDiff(1,1,1);
-
-		cv::floodFill(
-			inverseEdges,
-			floodMask,
-			seed,
-			cv::Scalar(),
-			nullptr,
-			loDiff,
-			upDiff,
-			4 | cv::FLOODFILL_MASK_ONLY | (255 << 8)
-		);
-
-		feltMask = floodMask(cv::Rect(1, 1, inverseEdges.cols, inverseEdges.rows)).clone();
-
-		//cv::morphologyEx(greenMask, greenMask, cv::MORPH_OPEN, kernel);
-		cv::morphologyEx(feltMask, feltMask, cv::MORPH_CLOSE, kernel);
-
-		imshow("Feltmask", feltMask);
-	}
-
-	*dst = feltMask;
-}
-
-std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
-{
-	Mat L;
-	{
-		Mat hls;
-		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
-
-		std::vector<Mat> channels;
-		cv::split(hls, channels);
-
-		L = channels[1];
-	}
-
-	Mat gray;
-	{
-		gray = L;
-
-		cv::GaussianBlur(gray, gray, cv::Size(s_Config.HoughGaussianKernel, s_Config.HoughGaussianKernel), s_Config.HoughGaussianStrength);
-		gray.setTo(0, *feltMask);
-	}
-
-	imshow("Gray", gray);
-
-	std::vector<BallCandidate> candidates;
-	{
-		std::vector<cv::Vec3f> circles;
-
-		cv::HoughCircles(
-			gray,
-			circles,
-			cv::HOUGH_GRADIENT,
-			s_Config.HoughInverseAccumReso,
-			s_Config.HoughMinCenterDistance,
-			s_Config.HoughUpperCannyThreshold,
-			s_Config.HoughAccumThreshold,
-			s_Config.HoughMinRadius,
-			s_Config.HoughMaxRadius
-		);
-
-		for (int i = 0; i < circles.size(); i++)
-		{
-			BallCandidate candidate;
-			candidate.Center = Point(circles[i][0], circles[i][1]);
-			candidate.Radius = circles[i][2];
-			candidate.Source = eHough;
-			candidates.emplace_back(candidate);
-		}
-	}
-
-	return candidates;
-}
-
-std::vector<BallCandidate> combineCircles(
-	const std::vector<BallCandidate>& candidates,
-	float radiusThreshold = 8.0f)
-{
-	std::vector<bool> used(candidates.size(), false);
-	std::vector<BallCandidate> result;
-
-	for (size_t i = 0; i < candidates.size(); ++i)
-	{
-		if (used[i])
-			continue;
-
-		float sumX = 0.0f, sumY = 0.0f, sumR = 0.0f;
-		int count = 0;
-
-		for (size_t j = i; j < candidates.size(); ++j)
-		{
-			if (used[j])
-				continue;
-
-			float dx = candidates[i].Center.x - candidates[j].Center.x;
-			float dy = candidates[i].Center.y - candidates[j].Center.y;
-
-			float dr = std::abs(candidates[i].Radius - candidates[j].Radius);
-
-			if (abs(dx) <= s_Config.CandidateCombineDistanceThresholdX && abs(dy) <= s_Config.CandidateCombineDistanceThresholdY && dr <= radiusThreshold)
-			{
-				used[j] = true;
-				sumX += candidates[j].Center.x;
-				sumY += candidates[j].Center.y;
-				sumR += candidates[j].Radius;
-				++count;
-			}
-		}
-
-		result.push_back({
-			cv::Point2f(sumX / count, sumY / count),
-			sumR / count,
-			candidates[i].Source
-			});
-	}
-
-	return result;
-}
-
-void printWeightMatrix(const std::vector<std::vector<float>>& weightMatrix)
-{
-	if (weightMatrix.empty())
-	{
-		std::cout << "Weight matrix is empty.\n";
-		return;
-	}
-
-	std::cout << std::setw(12) << "Candidate";
-	for (size_t j = 0; j < weightMatrix[0].size(); ++j)
-		std::cout << std::setw(8) << j;
-	std::cout << '\n';
-
-	std::cout << std::string(12 + weightMatrix[0].size() * 8, '-') << '\n';
-
-	for (size_t i = 0; i < weightMatrix.size(); ++i)
-	{
-		std::cout << std::setw(12) << i;
-
-		for (float weight : weightMatrix[i])
-			std::cout << std::setw(8) << std::fixed << std::setprecision(3) << weight;
-
-		std::cout << '\n';
-	}
-}
-
-// https://www.geeksforgeeks.org/dsa/hungarian-algorithm-assignment-problem-set-1-introduction/
-std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMatrix)
-{
-	const int numRows = static_cast<int>(weightMatrix.size());
-	if (numRows == 0)
-		return {};
-
-	const int numCols = static_cast<int>(weightMatrix[0].size());
-
-	if (numCols < numRows)
-		throw std::invalid_argument("Hungarian algorithm requires columns >= rows");
-
-	std::vector<double> potentialsRows(numRows + 1);
-	std::vector<double> potentialsCols(numCols + 1);
-	std::vector<int> currAssignments(numCols + 1);
-	std::vector<int> way(numCols + 1);
-
-	for (int row = 1; row <= numRows; ++row)
-	{
-		currAssignments[0] = row;
-		int col0 = 0;
-		std::vector<double> minReducedCosts(numCols + 1, std::numeric_limits<double>::infinity());
-		std::vector<bool> used(numCols + 1, false);
-
-		do
-		{
-			used[col0] = true;
-			const int row0 = currAssignments[col0];
-			double delta = std::numeric_limits<double>::infinity();
-			int col1 = 0;
-
-			for (int col = 1; col <= numCols; ++col)
-			{
-				if (used[col])
-					continue;
-
-				const double cost = -weightMatrix[row0 - 1][col - 1];
-				const double reducedCost = cost - potentialsRows[row0] - potentialsCols[col]; // Reduced cost
-
-				if (reducedCost < minReducedCosts[col])
-				{
-					minReducedCosts[col] = reducedCost;
-					way[col] = col0;
-				}
-
-				if (minReducedCosts[col] < delta)
-				{
-					delta = minReducedCosts[col];
-					col1 = col;
-				}
-			}
-
-			for (int col = 0; col <= numCols; ++col)
-			{
-				if (used[col])
-				{
-					potentialsRows[currAssignments[col]] += delta;
-					potentialsCols[col] -= delta;
-				}
-				else
-				{
-					minReducedCosts[col] -= delta;
-				}
-			}
-
-			col0 = col1;
-		} 
-		while (currAssignments[col0] != 0);
-
-		do
-		{
-			const int row1 = way[col0];
-			currAssignments[col0] = currAssignments[row1];
-			col0 = row1;
-		} 
-		while (col0 != 0);
-	}
-
-	std::vector<int> assignment(numRows, -1);
-
-	for (int row = 1; row <= numCols; ++row)
-	{
-		if (currAssignments[row] != 0)
-			assignment[currAssignments[row] - 1] = row - 1;
-	}
-
-	return assignment;
-}
-
-std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCandidate>& candidates, Mat* feltMask)
-{
-	std::vector<cv::Vec3f> paletteLab;
-	{
-		for (const auto& rgb : s_Config.RecognitionPalette)
-		{
-			Mat pixel(1, 1, CV_8UC3);
-			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(255 * rgb[2], 255 * rgb[1], 255 * rgb[0]); 
-
-			Mat lab;
-			cv::cvtColor(pixel, lab, cv::COLOR_BGR2Lab);
-
-			cv::Vec3b p = lab.at<cv::Vec3b>(0, 0);
-
-			paletteLab.emplace_back(
-				p[0] * (100.0f / 255.0f),
-				static_cast<float>(p[1]) - 128.0f,
-				static_cast<float>(p[2]) - 128.0f
-			);
-		}
-	}
-
-	Mat lab;
-	cv::cvtColor(*image, lab, cv::COLOR_BGR2Lab);
-
-	std::vector<std::vector<float>> weightMatrix;
-
-	for (uint32_t i = 0; i < candidates.size(); i++)
-	{
-		BallCandidate candidate = candidates[i];
-		candidate.Radius *= s_Config.RecognitionRadiusMult; // Exclude edges
-
-		// Discard ball contributions that overlap closer to the camera
-		Mat discardMask = feltMask->clone();
-		for (uint32_t other = 0; other < candidates.size(); other++)
-		{
-			float yDist = candidates[other].Center.y - candidates[i].Center.y;
-			if (other == i || yDist < s_Config.OverlapRejectionThreshold)
-				continue;
-
-			cv::circle(discardMask, candidates[other].Center, candidates[other].Radius, 255, cv::FILLED);
-		}
-
-		std::vector<float> weights;
-
-		for (uint32_t j = 0; j < BallID::eCount; j++)
-		{
-			uint paletteIdx = BallIdIsStriped(j) ? j - 8 : j;
-
-			cv::Vec3f expectedLab = paletteLab[paletteIdx];
-			cv::Vec3f whiteLab = paletteLab[BallID::eWhite];
-			cv::Vec3f specularWhiteLab = cv::Vec3f(100.0f, 0.0f, 0.0f);
-
-			int pixelCount;
-			float contrib = averageColorWeight(lab, discardMask, candidate, expectedLab, pixelCount);
-			float whiteContrib = averageColorWeight(lab, discardMask, candidate, whiteLab, pixelCount);
-			float specularContrib = averageColorWeight(lab, discardMask, candidate, specularWhiteLab, pixelCount);
-
-			float weight = 0.0f;
-
-			float pixelCountWeight = pixelCount * s_Config.PixelCountWeight;
-
-			if (j == BallID::eWhite || j == BallID::eBlack)
-			{
-				weight += contrib * s_Config.WhiteBlackContribWeight * pixelCountWeight;
-				weight += specularContrib * s_Config.WhiteBlackSpecularWeight;
-			}
-			else if (BallIdIsStriped(j)) 
-			{
-				weight += contrib * s_Config.StripesMainContribWeight * pixelCountWeight;
-				weight += whiteContrib * s_Config.StripesWhiteWeight;
-				weight += specularContrib * s_Config.StripesSpecularWeight;
-			}
-			else
-			{
-				weight += contrib * s_Config.SolidMainContribWeight * pixelCountWeight;
-				weight += whiteContrib * s_Config.SolidWhiteWeight;
-				weight += specularContrib * s_Config.SolidSpecularWeight;
-			}
-
-			if (weight < s_Config.RecognitionMinWeightThreshold)
-				weight = 0.0f;
-
-			weights.emplace_back(weight);
-		}
-
-		weightMatrix.emplace_back(std::move(weights));
-	}
-
-	printWeightMatrix(weightMatrix);
-
-	std::vector<AssignedCandidate> assignedList;
-
-	// Greedy Approach
-	if (!s_Config.UseHungarianSolver)
-	{
-		auto selectBall = [&](BallID ballId)
-		{
-			float maxWeight = 0.0f;
-			int maxIdx = -1;
-			for (uint32_t i = 0; i < candidates.size(); i++)
-			{
-				std::vector<float>& weights = weightMatrix[i];
-				float weight = weights[ballId];
-
-				if (weight > maxWeight)
-				{
-					maxWeight = weight;
-					maxIdx = i;
-				}
-			}
-
-			if (maxIdx != -1)
-			{
-				AssignedCandidate assigned;
-				assigned.Candidate = candidates[maxIdx];
-				assigned.ID = ballId;
-				assignedList.emplace_back(assigned);
-
-				for (uint32_t i = 0; i < candidates.size(); i++)
-				{
-					for (uint32_t j = 0; j < BallID::eCount; j++)
-					{
-						if (i != maxIdx && j != ballId)
-							continue;
-
-						weightMatrix[i][j] = 0.0f;
-					}
-				}
-			}
-		};
-
-		selectBall(BallID::eWhite);
-		selectBall(BallID::eBlack);
-
-		selectBall(BallID::eYellowSolid);
-		selectBall(BallID::eOrangeSolid);
-		selectBall(BallID::eRedSolid);
-		selectBall(BallID::eBrownSolid);
-		selectBall(BallID::ePurpleSolid);
-		selectBall(BallID::eBlueSolid);
-		selectBall(BallID::eGreenSolid);
-
-		selectBall(BallID::eYellowStriped);
-		selectBall(BallID::eOrangeStriped);
-		selectBall(BallID::eRedStriped);
-		selectBall(BallID::eBrownStriped);
-		selectBall(BallID::ePurpleStriped);
-		selectBall(BallID::eBlueStriped);
-		selectBall(BallID::eGreenStriped);
-	}
-
-	// Hungarian Approach
-	if (s_Config.UseHungarianSolver)
-	{
-		// TODO: If this approach is better, cancel out transpose
-		{
-			std::vector<std::vector<float>> transposed(BallID::eCount, std::vector<float>(candidates.size()));
-
-			for (size_t i = 0; i < candidates.size(); ++i)
-			{
-				for (int j = 0; j < BallID::eCount; ++j)
-				{
-					transposed[j][i] = weightMatrix[i][j];
-				}
-			}
-
-			weightMatrix = transposed;
-		}
-
-		// Fill Dummies
-		{
-			for (uint32_t i = 0; i < BallID::eCount; i++)
-			{
-				for (uint32_t j = candidates.size(); j < BallID::eCount; j++)
-					weightMatrix[i].emplace_back(0.0f);
-			}
-		}
-
-		auto results = hungarianSolver(weightMatrix);
-
-		for (uint32_t i = 0; i < results.size(); i++)
-		{
-			if (results[i] >= 0 && results[i] < candidates.size() && weightMatrix[i][results[i]] > 0.0f)
-			{
-				AssignedCandidate assigned;
-				assigned.Candidate = candidates[results[i]];
-				assigned.ID = BallID(i);
-				assignedList.emplace_back(assigned);
-			}
-		}
-	}
-
-	return assignedList;
-}
-
-void drawHollowCircles(
-	Mat* image,
-	const std::vector<BallCandidate>& circles,
-	const cv::Scalar& color = cv::Scalar(0, 0, 255),
-	int thickness = s_Config.CircleThickness)
-{
-	for (const auto& circle : circles)
-	{
-		cv::circle(*image, circle.Center, circle.Radius, color, thickness);
-	}
-}
-
-void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assignedList, bool tableCoords = false)
-{
-	for (uint32_t i = 0; i < assignedList.size(); i++)
-	{ 
-		BallCandidate circle = assignedList[i].Candidate;
-
-		if (tableCoords)
-		{
-			cv::Point2f obsPoint(circle.Center.x, circle.Center.y);
-			obsPoint = transformToEvalTable(obsPoint, s_Config.TablePointsF, image->cols, image->rows);
-			circle.Center.x = obsPoint.x;
-			circle.Center.y = obsPoint.y;
-		}
-
-		cv::Vec3b color = s_Config.DrawPalette[assignedList[i].ID];
-		cv::circle(*image, circle.Center, circle.Radius, color, s_Config.CircleThickness);
-
-		if (BallIdIsStriped(assignedList[i].ID))
-		{
-			cv::circle(*image, circle.Center, circle.Radius, cv::Scalar(255,255,255), s_Config.CircleThickness-1);
-		}
-	}
-}
-
 struct EvalBallPosition
 {
 	int Row;
@@ -1046,7 +183,7 @@ struct EvalBallPosition
 struct EvalImageBallPositions
 {
 	std::string Filename;
-	EvalBallPosition Balls[16]; 
+	EvalBallPosition Balls[16];
 };
 
 static const std::vector<EvalImageBallPositions> s_EvalBallPositions = {
@@ -1199,7 +336,820 @@ static const std::vector<EvalImageBallPositions> s_EvalBallPositions = {
 	}
 };
 
-float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<AssignedCandidate>& candidates, size_t width, size_t height)
+static bool isBallIdStriped(int id) { return id >= 9; }
+
+static void loadImage(Mat* image, const std::string& path)
+{
+	*image = imread(path, -1);
+
+	if (image->empty())
+	{
+		std::cout << "Could not open " << path << std::endl;
+		__debugbreak();
+	}
+}
+
+static void crop(Mat* src, Mat* dst, Point* srcPoints, cv::Scalar value)
+{
+	Mat mask = Mat::zeros(src->size(), CV_8UC1);
+
+	cv::fillConvexPoly(mask, srcPoints, 4, cv::Scalar(255));
+
+	*dst = src->clone();
+	dst->setTo(value, mask == 0);
+}
+
+static void perspectiveTransformImage(Mat* src, Mat* dst, cv::Point2f* srcPoints, size_t width, size_t height)
+{
+	// NW, NE, SE, SW
+	cv::Point2f dstPoints[4] = {
+		{0.0f,          0.0f},
+		{width - 1.0f,   0.0f},
+		{width - 1.0f,   height - 1.0f},
+		{0.0f,           height - 1.0f}
+	};
+
+	Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
+
+	cv::warpPerspective(*src, *dst, H, cv::Size(width, height));
+}
+
+static cv::Point2f perspectiveTransformPoint(cv::Point2f point, cv::Point2f* srcPoints, size_t width, size_t height)
+{
+	// NW, NE, SE, SW
+	cv::Point2f dstPoints[4] = {
+		{0.0f,          0.0f},
+		{width - 1.0f,   0.0f},
+		{width - 1.0f,   height - 1.0f},
+		{0.0f,           height - 1.0f}
+	};
+
+	Mat H = cv::getPerspectiveTransform(srcPoints, dstPoints);
+
+	std::vector<cv::Point2f> pointVec = { point };
+	std::vector<cv::Point2f> dst;
+
+	cv::perspectiveTransform(pointVec, dst, H);
+
+	return dst[0];
+}
+
+static cv::Point2f transformToTableSpace(cv::Point2f point, cv::Point2f* srcPoints, size_t width, size_t height)
+{
+	point = perspectiveTransformPoint(point, srcPoints, width, height);
+
+	point.x *= 1434.0f / float(width);
+	point.y *= 683.0f / float(height);
+
+	return point;
+}
+
+static double getLaplacianScore(const Mat& image, const Mat& circleMask)
+{
+	Mat laplacian;
+	cv::Laplacian(image, laplacian, CV_64F);
+
+	cv::Scalar _, stddev;
+	cv::meanStdDev(laplacian, _, stddev, circleMask);
+
+	return stddev[0] * stddev[0];
+}
+
+static double getEdgeDensityScore(const Mat& image, const Mat& circleMask)
+{
+	Mat edges;
+	cv::Canny(image, edges, 50, 150);
+
+	int edgePixels = cv::countNonZero(edges & circleMask);
+	int totalPixels = cv::countNonZero(circleMask);
+
+	return static_cast<double>(edgePixels) / totalPixels;
+}
+
+static float colorWeight(const cv::Vec3f& observedLab, const cv::Vec3f& expectedLab, float sigma = s_Config.LabGaussianStdDev)
+{
+	cv::Vec3f d = observedLab - expectedLab;
+
+	d[0] *= s_Config.LabDistanceWeightLightness;
+	d[1] *= s_Config.LabDistanceWeightRedGreen;
+	d[2] *= s_Config.LabDistanceWeightBlueYellow;
+
+	float dist = std::sqrt(d.dot(d));
+
+	return std::exp(-(dist * dist) / (2.0f * sigma * sigma)); // Gaussian
+}
+
+static float averageColorWeight(
+	const Mat& labImage,
+	const Mat& discardMask,
+	const BallCandidate& candidate,
+	const cv::Vec3f& expectedLab,
+	int& pixelCount,
+	float sigma = s_Config.LabGaussianStdDev)
+{
+	Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
+	int radius = cvRound(candidate.Radius);
+
+	cv::Rect bounds(0, 0, labImage.cols, labImage.rows);
+	cv::Rect roi(
+		center.x - radius,
+		center.y - radius,
+		radius * 2 + 1,
+		radius * 2 + 1);
+
+	roi &= bounds;
+	if (roi.empty())
+		return 0.0f;
+
+	Mat circleMask = Mat::zeros(roi.size(), CV_8UC1);
+	Point localCenter(center.x - roi.x, center.y - roi.y);
+	cv::circle(circleMask, localCenter, radius, cv::Scalar(255), cv::FILLED);
+
+	double totalWeight = 0.0;
+	pixelCount = 0;
+
+	for (int y = 0; y < roi.height; ++y)
+	{
+		for (int x = 0; x < roi.width; ++x)
+		{
+			if (circleMask.at<uchar>(y, x) == 0)
+				continue;
+
+			int imgX = roi.x + x;
+			int imgY = roi.y + y;
+			if (discardMask.at<uchar>(imgY, imgX) >= 1)
+				continue;
+
+			cv::Vec3b pixel = labImage.at<cv::Vec3b>(imgY, imgX);
+			cv::Vec3f pixelLab(pixel[0] * (100.0f / 255.0f), pixel[1] - 128.0f, pixel[2] - 128.0f);
+
+			totalWeight += colorWeight(pixelLab, expectedLab, sigma);
+			++pixelCount;
+		}
+	}
+
+	return pixelCount > 0 ? static_cast<float>(totalWeight / pixelCount) : 0.0f;
+}
+
+static bool hasSpecularHighlight(
+	const cv::Mat& lum,
+	const cv::Mat& includeMask,
+	const BallCandidate& candidate)
+{
+	cv::Point center(
+		cvRound(candidate.Center.x),
+		cvRound(candidate.Center.y));
+
+	int radius = cvRound(candidate.Radius);
+	float radiusMod = radius * s_Config.CandidateFilterHighlightRadiusMultiplier;
+
+	cv::Rect bounds(0, 0, lum.cols, lum.rows);
+	cv::Rect roi(
+		center.x - radiusMod,
+		center.y - radiusMod,
+		radiusMod * 2 + 1,
+		radiusMod * 2 + 1);
+
+	roi &= bounds;
+
+	if (roi.empty())
+		return false;
+
+	cv::Mat circleMask = cv::Mat::zeros(roi.size(), CV_8UC1);
+
+	cv::Point localCenter(
+		center.x - roi.x,
+		center.y - roi.y);
+
+	cv::circle(
+		circleMask, localCenter, radiusMod,
+		cv::Scalar(255), cv::FILLED);
+
+	int highlightPixels = 0;
+
+	for (int y = 0; y < roi.height; ++y)
+	{
+		for (int x = 0; x < roi.width; ++x)
+		{
+			if (circleMask.at<uchar>(y, x) == 0)
+				continue;
+
+			int imgX = roi.x + x;
+			int imgY = roi.y + y;
+
+			if (includeMask.at<uchar>(imgY, imgX) == 0)
+				continue;
+
+			uchar L = lum.at<uchar>(imgY, imgX);
+
+			if (L >= s_Config.CandidateFilterHighlightMinLightness)
+			{
+				++highlightPixels;
+
+				if (highlightPixels >= s_Config.CandidateFilterHighlightMinPixels)
+					return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+static std::vector<BallCandidate> filterCandidates(const std::vector<BallCandidate>& candidates, const Mat& image, double threshold)
+{
+	std::vector<BallCandidate> filtered;
+
+	Mat nonZeroMask;
+	{
+		if (image.channels() == 3)
+			cv::cvtColor(image, nonZeroMask, cv::COLOR_BGR2GRAY);
+		else
+			nonZeroMask = image;
+		cv::threshold(nonZeroMask, nonZeroMask, 0, 255, cv::THRESH_BINARY);
+	}
+
+	Mat lum;
+	{
+		cv::cvtColor(image, lum, cv::COLOR_BGR2HSV);
+		cv::extractChannel(lum, lum, 2);
+	}
+
+	Mat circleMask = Mat::zeros(image.size(), CV_8UC1);
+
+	for (const auto& candidate : candidates)
+	{
+		Point center(cvRound(candidate.Center.x), cvRound(candidate.Center.y));
+
+		// If circle within bounds, allow OOB pixels to be counted
+		Mat includeMask = nonZeroMask.clone();
+		if ((center.y >= s_Config.TablePoints[TABLE_NW].y || center.y >= s_Config.TablePoints[TABLE_NE].y) &&
+			(center.y <= s_Config.TablePoints[TABLE_SW].y || center.y <= s_Config.TablePoints[TABLE_SE].y) &&
+			(center.x >= s_Config.TablePoints[TABLE_NW].x || center.x >= s_Config.TablePoints[TABLE_NE].x) &&
+			(center.x <= s_Config.TablePoints[TABLE_SW].x || center.x <= s_Config.TablePoints[TABLE_SE].x))
+		{
+			crop(&includeMask, &includeMask, s_Config.TablePoints, 255);
+		}
+
+		float radius = cvRound(candidate.Radius);
+		if (radius <= 0.0f)
+			continue;
+
+		// Laplacian / edge density checks for net samples
+		{
+			float radiusMod = radius * s_Config.CandidateFilterLaplacianRadiusMultiplier;
+			circleMask.setTo(0);
+			cv::circle(
+				circleMask,
+				center,
+				radiusMod,
+				cv::Scalar(255),
+				cv::FILLED
+			);
+
+			Mat intersection;
+			cv::bitwise_and(includeMask, circleMask, intersection);
+
+			float laplacianScore = getLaplacianScore(lum, intersection);
+			float edgeDensityScore = getEdgeDensityScore(lum, intersection);
+
+			bool isInvalid = laplacianScore >= s_Config.CandidateFilterLaplacianThresholdUpper;  // Net Samples
+			isInvalid |= laplacianScore < s_Config.CandidateFilterLaplacianThresholdLower;		 // Felt Samples
+			isInvalid |= edgeDensityScore >= s_Config.CandidateFilterEdgeDensityThreshold;		 // Net Samples (Failing)
+			if (isInvalid)
+				continue;
+		}
+
+		// Specular Highlight Check
+		{
+			if (!hasSpecularHighlight(lum, includeMask, candidate))
+				continue;
+		}
+
+		// Pixel count checks for felt samples
+		{
+			float radiusMod = radius * s_Config.CandidateFilterPixelCountRadiusMultiplier;
+			circleMask.setTo(0);
+			cv::circle(
+				circleMask,
+				center,
+				radiusMod,
+				cv::Scalar(255),
+				cv::FILLED
+			);
+
+			double totalPixels = cv::countNonZero(circleMask);
+			if (totalPixels == 0)
+				continue;
+
+			Mat intersection;
+			cv::bitwise_and(includeMask, circleMask, intersection);
+
+			double ratio = static_cast<double>(cv::countNonZero(intersection)) / totalPixels;
+			if (ratio < threshold)
+				continue;
+		}
+
+		filtered.push_back(candidate);
+	}
+
+	return filtered;
+}
+
+static Point findCenterSeed(const Mat& mask)
+{
+	Point center(mask.cols / 2, mask.rows / 2);
+
+	std::vector<Point> points;
+	cv::findNonZero(mask, points);
+
+	if (points.empty())
+		return Point(-1, -1);
+
+	Point closest = points[0];
+	double minDist = DBL_MAX;
+
+	for (const Point& p : points)
+	{
+		double dx = p.x - center.x;
+		double dy = p.y - center.y;
+		double dist = dx * dx + dy * dy;
+
+		if (dist < minDist)
+		{
+			minDist = dist;
+			closest = p;
+		}
+	}
+
+	return closest;
+}
+
+static void computeFeltMask(Mat* src, Mat* dst)
+{
+	Mat HLS;
+	{
+		cv::cvtColor(*src, HLS, cv::COLOR_BGR2HLS);
+
+		std::vector<Mat> channels;
+		cv::split(HLS, channels);
+	}
+
+	Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(s_Config.FeltMaskMorphKernel, s_Config.FeltMaskMorphKernel));
+
+	Mat inverseEdges;
+	{
+		Mat col = HLS;
+		cv::GaussianBlur(col, col, cv::Size(s_Config.FeltMaskGaussianKernel, s_Config.FeltMaskGaussianKernel), s_Config.FeltMaskGaussianStrength);
+
+		Mat edges;
+		cv::Canny(col, edges, s_Config.CannyWeakThreshold, s_Config.CannyStrongThreshold);
+
+		imshow("Edges", edges);
+
+		for (int i = 0; i < s_Config.CannyNumDilations; i++)
+			cv::morphologyEx(edges, edges, cv::MORPH_DILATE, kernel);
+
+		for (int i = 0; i < s_Config.CannyNumErosions; i++)
+			cv::morphologyEx(edges, edges, cv::MORPH_ERODE, kernel);
+
+		cv::bitwise_not(edges, inverseEdges);
+	}
+
+	Mat feltMask;
+	{
+		Mat floodMask = Mat::zeros(inverseEdges.rows + 2, inverseEdges.cols + 2, CV_8UC1);
+
+		Point seed = findCenterSeed(inverseEdges);
+
+		cv::Scalar loDiff(1, 1, 1);
+		cv::Scalar upDiff(1, 1, 1);
+
+		cv::floodFill(
+			inverseEdges,
+			floodMask,
+			seed,
+			cv::Scalar(),
+			nullptr,
+			loDiff,
+			upDiff,
+			4 | cv::FLOODFILL_MASK_ONLY | (255 << 8)
+		);
+
+		feltMask = floodMask(cv::Rect(1, 1, inverseEdges.cols, inverseEdges.rows)).clone();
+
+		cv::morphologyEx(feltMask, feltMask, cv::MORPH_CLOSE, kernel);
+
+		imshow("Feltmask", feltMask);
+	}
+
+	*dst = feltMask;
+}
+
+static std::vector<BallCandidate> detectBallsHough(Mat* image, Mat* feltMask)
+{
+	Mat L;
+	{
+		Mat hls;
+		cv::cvtColor(*image, hls, cv::COLOR_BGR2HLS);
+
+		std::vector<Mat> channels;
+		cv::split(hls, channels);
+
+		L = channels[1];
+	}
+
+	Mat gray;
+	{
+		gray = L;
+
+		cv::GaussianBlur(gray, gray, cv::Size(s_Config.HoughGaussianKernel, s_Config.HoughGaussianKernel), s_Config.HoughGaussianStrength);
+		gray.setTo(0, *feltMask);
+	}
+
+	imshow("Gray", gray);
+
+	std::vector<BallCandidate> candidates;
+	{
+		std::vector<cv::Vec3f> circles;
+
+		cv::HoughCircles(
+			gray,
+			circles,
+			cv::HOUGH_GRADIENT,
+			s_Config.HoughInverseAccumReso,
+			s_Config.HoughMinCenterDistance,
+			s_Config.HoughUpperCannyThreshold,
+			s_Config.HoughAccumThreshold,
+			s_Config.HoughMinRadius,
+			s_Config.HoughMaxRadius
+		);
+
+		for (int i = 0; i < circles.size(); i++)
+		{
+			BallCandidate candidate;
+			candidate.Center = Point(circles[i][0], circles[i][1]);
+			candidate.Radius = circles[i][2];
+			candidates.emplace_back(candidate);
+		}
+	}
+
+	return candidates;
+}
+
+static std::vector<BallCandidate> combineCircles(
+	const std::vector<BallCandidate>& candidates,
+	float radiusThreshold = 8.0f)
+{
+	std::vector<bool> used(candidates.size(), false);
+	std::vector<BallCandidate> result;
+
+	for (size_t i = 0; i < candidates.size(); ++i)
+	{
+		if (used[i])
+			continue;
+
+		float sumX = 0.0f, sumY = 0.0f, sumR = 0.0f;
+		int count = 0;
+
+		for (size_t j = i; j < candidates.size(); ++j)
+		{
+			if (used[j])
+				continue;
+
+			float dx = candidates[i].Center.x - candidates[j].Center.x;
+			float dy = candidates[i].Center.y - candidates[j].Center.y;
+
+			float dr = std::abs(candidates[i].Radius - candidates[j].Radius);
+
+			if (abs(dx) <= s_Config.CandidateCombineDistanceThresholdX && abs(dy) <= s_Config.CandidateCombineDistanceThresholdY && dr <= radiusThreshold)
+			{
+				used[j] = true;
+				sumX += candidates[j].Center.x;
+				sumY += candidates[j].Center.y;
+				sumR += candidates[j].Radius;
+				++count;
+			}
+		}
+
+		result.push_back({
+			cv::Point2f(sumX / count, sumY / count),
+			sumR / count
+			});
+	}
+
+	return result;
+}
+
+static void printWeightMatrix(const std::vector<std::vector<float>>& weightMatrix)
+{
+	if (weightMatrix.empty())
+	{
+		std::cout << "Weight matrix is empty.\n";
+		return;
+	}
+
+	std::cout << std::setw(12) << "Candidate";
+	for (size_t j = 0; j < weightMatrix[0].size(); ++j)
+		std::cout << std::setw(8) << j;
+	std::cout << '\n';
+
+	std::cout << std::string(12 + weightMatrix[0].size() * 8, '-') << '\n';
+
+	for (size_t i = 0; i < weightMatrix.size(); ++i)
+	{
+		std::cout << std::setw(12) << i;
+
+		for (float weight : weightMatrix[i])
+			std::cout << std::setw(8) << std::fixed << std::setprecision(3) << weight;
+
+		std::cout << '\n';
+	}
+}
+
+// https://www.geeksforgeeks.org/dsa/hungarian-algorithm-assignment-problem-set-1-introduction/
+static std::vector<int> hungarianSolver(const std::vector<std::vector<float>>& weightMatrix)
+{
+	const int numRows = static_cast<int>(weightMatrix.size());
+	if (numRows == 0)
+		return {};
+
+	const int numCols = static_cast<int>(weightMatrix[0].size());
+
+	if (numCols < numRows)
+		throw std::invalid_argument("Hungarian algorithm requires columns >= rows");
+
+	std::vector<double> potentialsRows(numRows + 1);
+	std::vector<double> potentialsCols(numCols + 1);
+	std::vector<int> currAssignments(numCols + 1);
+	std::vector<int> way(numCols + 1);
+
+	for (int row = 1; row <= numRows; ++row)
+	{
+		currAssignments[0] = row;
+		int col0 = 0;
+		std::vector<double> minReducedCosts(numCols + 1, std::numeric_limits<double>::infinity());
+		std::vector<bool> used(numCols + 1, false);
+
+		do
+		{
+			used[col0] = true;
+			const int row0 = currAssignments[col0];
+			double delta = std::numeric_limits<double>::infinity();
+			int col1 = 0;
+
+			for (int col = 1; col <= numCols; ++col)
+			{
+				if (used[col])
+					continue;
+
+				const double cost = -weightMatrix[row0 - 1][col - 1];
+				const double reducedCost = cost - potentialsRows[row0] - potentialsCols[col]; // Reduced cost
+
+				if (reducedCost < minReducedCosts[col])
+				{
+					minReducedCosts[col] = reducedCost;
+					way[col] = col0;
+				}
+
+				if (minReducedCosts[col] < delta)
+				{
+					delta = minReducedCosts[col];
+					col1 = col;
+				}
+			}
+
+			for (int col = 0; col <= numCols; ++col)
+			{
+				if (used[col])
+				{
+					potentialsRows[currAssignments[col]] += delta;
+					potentialsCols[col] -= delta;
+				}
+				else
+				{
+					minReducedCosts[col] -= delta;
+				}
+			}
+
+			col0 = col1;
+		} while (currAssignments[col0] != 0);
+
+		do
+		{
+			const int row1 = way[col0];
+			currAssignments[col0] = currAssignments[row1];
+			col0 = row1;
+		} while (col0 != 0);
+	}
+
+	std::vector<int> assignment(numRows, -1);
+
+	for (int row = 1; row <= numCols; ++row)
+	{
+		if (currAssignments[row] != 0)
+			assignment[currAssignments[row] - 1] = row - 1;
+	}
+
+	return assignment;
+}
+
+static std::vector<AssignedCandidate> findBestFits(Mat* image, const std::vector<BallCandidate>& candidates, Mat* feltMask)
+{
+	std::vector<cv::Vec3f> paletteLab;
+	{
+		for (const auto& rgb : s_Config.RecognitionPalette)
+		{
+			Mat pixel(1, 1, CV_8UC3);
+			pixel.at<cv::Vec3b>(0, 0) = cv::Vec3b(255 * rgb[2], 255 * rgb[1], 255 * rgb[0]);
+
+			Mat lab;
+			cv::cvtColor(pixel, lab, cv::COLOR_BGR2Lab);
+
+			cv::Vec3b p = lab.at<cv::Vec3b>(0, 0);
+
+			paletteLab.emplace_back(
+				p[0] * (100.0f / 255.0f),
+				static_cast<float>(p[1]) - 128.0f,
+				static_cast<float>(p[2]) - 128.0f
+			);
+		}
+	}
+
+	Mat lab;
+	cv::cvtColor(*image, lab, cv::COLOR_BGR2Lab);
+
+	std::vector<std::vector<float>> weightMatrix;
+
+	for (uint32_t i = 0; i < candidates.size(); i++)
+	{
+		BallCandidate candidate = candidates[i];
+		candidate.Radius *= s_Config.RecognitionRadiusMult; // Exclude edges
+
+		// Discard ball contributions that overlap closer to the camera
+		Mat discardMask = feltMask->clone();
+		for (uint32_t other = 0; other < candidates.size(); other++)
+		{
+			float yDist = candidates[other].Center.y - candidates[i].Center.y;
+			if (other == i || yDist < s_Config.OverlapRejectionThreshold)
+				continue;
+
+			cv::circle(discardMask, candidates[other].Center, candidates[other].Radius, 255, cv::FILLED);
+		}
+
+		std::vector<float> weights;
+
+		for (uint32_t j = 0; j < BallID::eCount; j++)
+		{
+			uint paletteIdx = isBallIdStriped(j) ? j - 8 : j;
+
+			cv::Vec3f expectedLab = paletteLab[paletteIdx];
+			cv::Vec3f whiteLab = paletteLab[BallID::eWhite];
+			cv::Vec3f specularWhiteLab = cv::Vec3f(100.0f, 0.0f, 0.0f);
+
+			int pixelCount;
+			float contrib = averageColorWeight(lab, discardMask, candidate, expectedLab, pixelCount);
+			float whiteContrib = averageColorWeight(lab, discardMask, candidate, whiteLab, pixelCount);
+			float specularContrib = averageColorWeight(lab, discardMask, candidate, specularWhiteLab, pixelCount);
+
+			float weight = 0.0f;
+
+			float pixelCountWeight = pixelCount * s_Config.PixelCountWeight;
+
+			if (j == BallID::eWhite || j == BallID::eBlack)
+			{
+				weight += contrib * s_Config.WhiteBlackContribWeight * pixelCountWeight;
+				weight += specularContrib * s_Config.WhiteBlackSpecularWeight;
+			}
+			else if (isBallIdStriped(j))
+			{
+				weight += contrib * s_Config.StripesMainContribWeight * pixelCountWeight;
+				weight += whiteContrib * s_Config.StripesWhiteWeight;
+				weight += specularContrib * s_Config.StripesSpecularWeight;
+			}
+			else
+			{
+				weight += contrib * s_Config.SolidMainContribWeight * pixelCountWeight;
+				weight += whiteContrib * s_Config.SolidWhiteWeight;
+				weight += specularContrib * s_Config.SolidSpecularWeight;
+			}
+
+			if (weight < s_Config.RecognitionMinWeightThreshold)
+				weight = 0.0f;
+
+			weights.emplace_back(weight);
+		}
+
+		weightMatrix.emplace_back(std::move(weights));
+	}
+
+	printWeightMatrix(weightMatrix);
+
+	std::vector<AssignedCandidate> assignedList;
+
+	// Greedy Approach
+	if (!s_Config.UseHungarianSolver)
+	{
+		auto selectBall = [&](BallID ballId)
+			{
+				float maxWeight = 0.0f;
+				int maxIdx = -1;
+				for (uint32_t i = 0; i < candidates.size(); i++)
+				{
+					std::vector<float>& weights = weightMatrix[i];
+					float weight = weights[ballId];
+
+					if (weight > maxWeight)
+					{
+						maxWeight = weight;
+						maxIdx = i;
+					}
+				}
+
+				if (maxIdx != -1)
+				{
+					AssignedCandidate assigned;
+					assigned.Candidate = candidates[maxIdx];
+					assigned.ID = ballId;
+					assignedList.emplace_back(assigned);
+
+					for (uint32_t i = 0; i < candidates.size(); i++)
+					{
+						for (uint32_t j = 0; j < BallID::eCount; j++)
+						{
+							if (i != maxIdx && j != ballId)
+								continue;
+
+							weightMatrix[i][j] = 0.0f;
+						}
+					}
+				}
+			};
+
+		selectBall(BallID::eWhite);
+		selectBall(BallID::eBlack);
+
+		selectBall(BallID::eYellowSolid);
+		selectBall(BallID::eOrangeSolid);
+		selectBall(BallID::eRedSolid);
+		selectBall(BallID::eBrownSolid);
+		selectBall(BallID::ePurpleSolid);
+		selectBall(BallID::eBlueSolid);
+		selectBall(BallID::eGreenSolid);
+
+		selectBall(BallID::eYellowStriped);
+		selectBall(BallID::eOrangeStriped);
+		selectBall(BallID::eRedStriped);
+		selectBall(BallID::eBrownStriped);
+		selectBall(BallID::ePurpleStriped);
+		selectBall(BallID::eBlueStriped);
+		selectBall(BallID::eGreenStriped);
+	}
+
+	// Hungarian Approach
+	if (s_Config.UseHungarianSolver)
+	{
+		// TODO: If this approach is better, cancel out transpose
+		{
+			std::vector<std::vector<float>> transposed(BallID::eCount, std::vector<float>(candidates.size()));
+
+			for (size_t i = 0; i < candidates.size(); ++i)
+			{
+				for (int j = 0; j < BallID::eCount; ++j)
+				{
+					transposed[j][i] = weightMatrix[i][j];
+				}
+			}
+
+			weightMatrix = transposed;
+		}
+
+		// Fill Dummies
+		{
+			for (uint32_t i = 0; i < BallID::eCount; i++)
+			{
+				for (uint32_t j = candidates.size(); j < BallID::eCount; j++)
+					weightMatrix[i].emplace_back(0.0f);
+			}
+		}
+
+		auto results = hungarianSolver(weightMatrix);
+
+		for (uint32_t i = 0; i < results.size(); i++)
+		{
+			if (results[i] >= 0 && results[i] < candidates.size() && weightMatrix[i][results[i]] > 0.0f)
+			{
+				AssignedCandidate assigned;
+				assigned.Candidate = candidates[results[i]];
+				assigned.ID = BallID(i);
+				assignedList.emplace_back(assigned);
+			}
+		}
+	}
+
+	return assignedList;
+}
+
+static float evaluatePerformance(const EvalImageBallPositions& eval, std::vector<AssignedCandidate>& candidates, size_t width, size_t height)
 {
 	float totalScore = 0.0f;
 
@@ -1247,7 +1197,9 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 		float imageCoordY = evalPos.Row;
 
 		cv::Point2f obsPoint(candidate->Center.x, candidate->Center.y);
-		obsPoint = transformToEvalTable(obsPoint, s_Config.TablePointsF, width, height);
+		obsPoint = transformToTableSpace(obsPoint, s_Config.TablePointsF, width, height);
+
+		std::cout << (int)round(obsPoint.x) << ", " << (int)round(obsPoint.y) << std::endl;
 
 		float distX = (obsPoint.x - imageCoordX);
 		float distY = (obsPoint.y - imageCoordY);
@@ -1273,7 +1225,43 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 	return totalScore / float(BallID::eCount); // Reduce magnitude
 }
 
-void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
+static void drawHollowCircles(
+	Mat* image,
+	const std::vector<BallCandidate>& circles,
+	const cv::Scalar& color = cv::Scalar(0, 0, 255),
+	int thickness = s_Config.CircleThickness)
+{
+	for (const auto& circle : circles)
+	{
+		cv::circle(*image, circle.Center, circle.Radius, color, thickness);
+	}
+}
+
+static void drawAssignedColors(Mat* image, const std::vector<AssignedCandidate>& assignedList, bool tableCoords = false)
+{
+	for (uint32_t i = 0; i < assignedList.size(); i++)
+	{
+		BallCandidate circle = assignedList[i].Candidate;
+
+		if (tableCoords)
+		{
+			cv::Point2f obsPoint(circle.Center.x, circle.Center.y);
+			obsPoint = transformToTableSpace(obsPoint, s_Config.TablePointsF, image->cols, image->rows);
+			circle.Center.x = obsPoint.x;
+			circle.Center.y = obsPoint.y;
+		}
+
+		cv::Vec3b color = s_Config.DrawPalette[assignedList[i].ID];
+		cv::circle(*image, circle.Center, circle.Radius, color, s_Config.CircleThickness);
+
+		if (isBallIdStriped(assignedList[i].ID))
+		{
+			cv::circle(*image, circle.Center, circle.Radius, cv::Scalar(255, 255, 255), s_Config.CircleThickness - 1);
+		}
+	}
+}
+
+static void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
 {
 	for (int i = 0; i < BallID::eCount; i++)
 	{
@@ -1291,7 +1279,7 @@ void drawEvalCircles(Mat* image, const EvalImageBallPositions& eval)
 		cv::Vec3b color = s_Config.DrawPalette[i];
 		cv::circle(*image, p, s_Config.EvalCircleDrawRadius, color, s_Config.CircleThickness);
 
-		if (BallIdIsStriped(i))
+		if (isBallIdStriped(i))
 		{
 			cv::circle(*image, p, s_Config.EvalCircleDrawRadius, cv::Scalar(255, 255, 255), s_Config.CircleThickness - 1);
 		}
@@ -1317,7 +1305,7 @@ void MyApplication()
 		size_t width = in->cols;
 		size_t height = in->rows;
 
-		crop(in, out, s_Config.TablePoints, cv::Scalar(0,0,0));
+		crop(in, out, s_Config.TablePoints, cv::Scalar(0, 0, 0));
 
 		Mat feltMask;
 		computeFeltMask(out, &feltMask);
@@ -1353,43 +1341,17 @@ void MyApplication()
 		drawAssignedColors(&display, assignedList);
 		imshow("Recognition", display);
 
-		float score = EvaluatePerformance(s_EvalBallPositions[i], assignedList, width, height);
+		float score = evaluatePerformance(s_EvalBallPositions[i], assignedList, width, height);
 		scores.emplace_back(score);
 		totalScore += score;
 		std::cout << s_Config.FileNameList[i] << " score: " << score << std::endl;
 
 		display = out->clone();
-		perspectiveTransform(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
+		perspectiveTransformImage(&display, &display, s_Config.TablePointsF, display.cols, display.rows);
 		cv::resize(display, display, cv::Size(1434, 683));
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
 		drawAssignedColors(&display, assignedList, true);
 		imshow("Eval", display);
-
-		std::cout << s_Config.FileNameList[i] << ":" << std::endl;
-		for (int i = 0; i < BallID::eCount; i++)
-		{
-			BallCandidate* candidate = nullptr;
-			for (int j = 0; j < assignedList.size(); j++)
-			{
-				if (assignedList[j].ID == i)
-				{
-					candidate = &assignedList[j].Candidate;
-					break;
-				}
-			}
-
-			std::cout << "Ball " << std::to_string(i) << ": ";
-
-			if (!candidate)
-			{
-				std::cout << "N/A" << std::endl;
-				continue;
-			}
-
-			cv::Point2f obsPoint(candidate->Center.x, candidate->Center.y);
-			obsPoint = transformToEvalTable(obsPoint, s_Config.TablePointsF, width, height);
-			std::cout << (int)round(obsPoint.x) << ", " << (int)round(obsPoint.y) << std::endl;
-		}
 
 		if (!s_Config.RunAllImages)
 			cv::waitKey();
