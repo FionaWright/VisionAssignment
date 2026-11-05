@@ -54,15 +54,15 @@ struct Config
 	// Input
 	const char* FolderPath = "Media/Pool/";
 	std::vector<const char*> FileNameList = {
-		"AllBalls.jpeg",
-		"Table1.jpeg",
-		"Table2.jpeg",
-		"Table3.jpeg",
-		"Table4.jpeg",
-		"Table5.jpeg",
+		//"AllBalls.jpeg",
+		//"Table1.jpeg",
+		//"Table2.jpeg",
+		//"Table3.jpeg",
+		//"Table4.jpeg",
+		//"Table5.jpeg",
 		"Table6.jpeg"
 	};
-	bool RunAllImages = true;
+	bool RunAllImages = false;
 
 	// Table
 	Point TablePoints[4] = { // NW, NE, SE, SW
@@ -1203,6 +1203,12 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 {
 	float totalScore = 0.0f;
 
+	float meanDist = 0.0f;
+	uint32_t ballOnTableCount = 0;
+
+	float maxDist = -INFINITY;
+	float minDist = INFINITY;
+
 	for (int i = 0; i < BallID::eCount; i++)
 	{
 		BallCandidate* candidate = nullptr;
@@ -1215,6 +1221,8 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 			}
 		}
 
+		std::cout << "Ball " << std::to_string(i) << ": ";
+
 		EvalBallPosition evalPos = eval.Balls[i];
 
 		bool foundCandidate = candidate != nullptr;
@@ -1222,6 +1230,7 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 
 		if (!foundCandidate && !ballOnTable)
 		{
+			std::cout << "N/A" << std::endl;
 			totalScore += s_Config.MissingBallReward;
 			continue;
 		}
@@ -1243,10 +1252,23 @@ float EvaluatePerformance(const EvalImageBallPositions& eval, std::vector<Assign
 		float distX = (obsPoint.x - imageCoordX);
 		float distY = (obsPoint.y - imageCoordY);
 		float lenSqr = distX * distX + distY * distY;
+		float dist = sqrt(lenSqr);
+
+		std::cout << (int)dist << std::endl;
+
+		maxDist = std::max(maxDist, dist);
+		minDist = std::min(minDist, dist);
+		meanDist += dist;
+		ballOnTableCount++;
 
 		lenSqr = std::min(s_Config.EvalDistanceMax, lenSqr);
 		totalScore += lenSqr * s_Config.DistancePenaltyWeight;
 	}
+
+	meanDist /= ballOnTableCount;
+	std::cout << "Mean: " << meanDist << std::endl;
+	std::cout << "Min: " << (int)minDist << std::endl;
+	std::cout << "Max: " << (int)maxDist << std::endl;
 
 	return totalScore / float(BallID::eCount); // Reduce magnitude
 }
