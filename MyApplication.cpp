@@ -54,12 +54,12 @@ struct Config
 	// Input
 	const char* FolderPath = "Media/Pool/";
 	std::vector<const char*> FileNameList = {
-		//"AllBalls.jpeg",
-		//"Table1.jpeg",
-		//"Table2.jpeg",
-		//"Table3.jpeg",
-		//"Table4.jpeg",
-		//"Table5.jpeg",
+		"AllBalls.jpeg",
+		"Table1.jpeg",
+		"Table2.jpeg",
+		"Table3.jpeg",
+		"Table4.jpeg",
+		"Table5.jpeg",
 		"Table6.jpeg"
 	};
 	bool RunAllImages = false;
@@ -145,7 +145,7 @@ struct Config
 		{0.93f, 0.87f, 0.7f},     // 00: White
 		{0.98f, 0.76f,  0.0f},    // 01: Yellow
 		{0.17f, 0.17f, 0.35f},    // 02: Blue
-		{0.9f,  0.0f,  0.0f},     // 03: Red
+		{0.94f, 0.23f, 0.25f},     // 03: Red
 		{0.32f, 0.22f, 0.41f},    // 04: Purple
 		{0.96f, 0.44f, 0.22f},    // 05: Orange
 		{0.0f,  0.1f,  0.0f},     // 06: Green
@@ -1363,7 +1363,7 @@ void MyApplication()
 		cv::resize(display, display, cv::Size(1434, 683));
 		drawEvalCircles(&display, s_EvalBallPositions[i]);
 		drawAssignedColors(&display, assignedList, true);
-		//imshow("Eval", display);
+		imshow("Eval", display);
 
 		std::cout << s_Config.FileNameList[i] << ":" << std::endl;
 		for (int i = 0; i < BallID::eCount; i++)
